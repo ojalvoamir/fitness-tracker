@@ -1,45 +1,43 @@
 import os
 import json
 import logging
+import asyncio  # ← THIS WAS MISSING!
 from datetime import datetime
 
-# Telegram Bot with connection pool settings
+# Telegram Bot
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.request import HTTPXRequest
 
-# Flask for webhooks and health check
-from flask import Flask, request, jsonify
+# Flask for webhooks
+from flask import Flask, request
 
-# Simple in-memory storage
+# Simple storage
 workouts_storage = []
 webhook_logs = []
 
-# Configure logging
+# Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get environment variables
+# Environment
 bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
 webhook_url = os.environ.get('WEBHOOK_URL')
 
-if not bot_token:
-    logger.error("❌ Missing TELEGRAM_BOT_TOKEN environment variable")
-    exit(1)
-
-if not webhook_url:
-    logger.error("❌ Missing WEBHOOK_URL environment variable")
+if not bot_token or not webhook_url:
+    logger.error("❌ Missing environment variables")
     exit(1)
 
 # Flask app
 app = Flask(__name__)
 
-# FIXED: Initialize bot with larger connection pool and timeout settings
+# Bot setup with reasonable timeouts
 request_handler = HTTPXRequest(
-    connection_pool_size=20,  # Increased from default 8
-    pool_timeout=30.0,        # Increased timeout
-    read_timeout=30.0,        # Increased read timeout
-    write_timeout=30.0        # Increased write timeout
+    connection_pool_size=20,
+    pool_timeout=30.0,
+    read_timeout=30.0,
+    write_timeout=30.0,
+    connect_timeout=10.0
 )
 
 application = Application.builder().token(bot_token).updater(None).request(request_handler).build()
@@ -50,11 +48,9 @@ def health_check():
     ✅ Fitness Bot is running!
     📊 Logged {len(workouts_storage)} workouts
     🔗 Webhook calls: {len(webhook_logs)}
-    🕐 Last webhook: {webhook_logs[-1]['timestamp'] if webhook_logs else 'None'}
+    🕐 Last: {webhook_logs[-1]['timestamp'] if webhook_logs else 'None'}
     
-    🧪 Test endpoints:
-    • /workouts - View all workouts
-    • /webhook-logs - View webhook call logs
+    🐛 BUG FIXED: asyncio import added!
     """, 200
 
 @app.route('/workouts')
@@ -67,33 +63,31 @@ def show_webhook_logs():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Handle incoming Telegram updates via webhook - NON-ASYNC VERSION"""
+    """Handle incoming webhook from Telegram"""
     try:
         # Log the webhook call
-        webhook_logs.append({
+        webhook_data = {
             "timestamp": datetime.now().isoformat(),
             "method": request.method,
-            "headers": dict(request.headers),
-            "data": request.get_json() if request.is_json else None
-        })
+            "data": request.get_json() if request.is_json else None,
+            "headers": dict(request.headers)
+        }
+        webhook_logs.append(webhook_data)
         
-        # Get the update from Telegram
+        logger.info(f"📨 Received webhook: {webhook_data['data']}")
+        
         update_data = request.get_json()
-        logger.info(f"📨 Received webhook: {update_data}")
         
         if update_data:
-            # Create Update object and process it
             update = Update.de_json(update_data, application.bot)
             logger.info(f"🔄 Processing update: {update.update_id}")
             
-            # Process the update - SYNCHRONOUS VERSION with timeout handling
-            import asyncio
+            # Process the update with timeout handling
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                # FIXED: Add timeout to prevent hanging
                 loop.run_until_complete(
-                    asyncio.wait_for(application.process_update(update), timeout=25.0)
+                    asyncio.wait_for(application.process_update(update), timeout=30.0)
                 )
                 logger.info("✅ Update processed successfully")
             except asyncio.TimeoutError:
@@ -106,14 +100,9 @@ def webhook():
         return "OK", 200
     except Exception as e:
         logger.error(f"❌ Webhook error: {e}")
-        webhook_logs.append({
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-            "traceback": str(e)
-        })
         return "Error", 500
 
-# Simple parser (no AI for now)
+# Simple parser
 def simple_parse(text):
     return {
         "date": datetime.now().strftime('%Y-%m-%d'),
@@ -121,26 +110,27 @@ def simple_parse(text):
         "timestamp": datetime.now().isoformat()
     }
 
-# Bot handlers with timeout protection
+# Bot handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"📱 /start command from user {update.effective_user.id}")
+    logger.info(f"📱 /start command from {update.effective_user.id}")
     try:
         await asyncio.wait_for(
             update.message.reply_text(
-                "🤖 Fitness Tracker Bot v3.4 (TIMEOUT FIXED!)\n\n"
-                "Send me your workouts and I'll log them!\n"
+                "🚀 Fitness Bot v3.1 - Bug Fixed!\n\n"
+                "💪 Send me your workouts and I'll log them!\n\n"
                 "Examples:\n"
-                "• '5 pull ups, 10 pushups'\n"
-                "• 'ran 3km in 20 minutes'\n"
-                "• 'squats 3x8 at 60kg'\n\n"
-                "✅ Now with better timeout handling!"
+                "• '5 pull ups'\n"
+                "• 'ran 3km in 25 minutes'\n"
+                "• 'squats 60kg x8 x3'\n\n"
+                "🐛 Fixed: asyncio import issue!"
             ),
             timeout=20.0
         )
+        logger.info("✅ Start command reply sent")
     except asyncio.TimeoutError:
         logger.warning("⚠️ Start command reply timed out")
     except Exception as e:
-        logger.error(f"❌ Error in start command: {e}")
+        logger.error(f"❌ Start command error: {e}")
 
 async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text
@@ -150,27 +140,27 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"💪 Workout message from {username}: '{user_input}'")
     
     try:
+        # Parse and store the workout
         workout_data = simple_parse(user_input)
         workout_data['user_id'] = user_id
         workout_data['username'] = username
         
         workouts_storage.append(workout_data)
+        logger.info(f"✅ Workout logged for {username}")
         
+        # Try to send confirmation with timeout
         response_text = (
             f"✅ Workout logged!\n"
-            f"📝 '{user_input}'\n"
-            f"📊 Total workouts: {len(workouts_storage)}\n"
-            f"👤 User: {username}\n"
-            f"🆔 Update ID: {update.update_id}"
+            f"💪 {user_input}\n"
+            f"📊 Total workouts: {len(workouts_storage)}"
         )
         
-        # FIXED: Add timeout to reply
         try:
             await asyncio.wait_for(
                 update.message.reply_text(response_text),
                 timeout=20.0
             )
-            logger.info(f"✅ Response sent to {username}")
+            logger.info(f"✅ Confirmation sent to {username}")
         except asyncio.TimeoutError:
             logger.warning(f"⚠️ Reply to {username} timed out, but workout was logged")
         
@@ -178,55 +168,49 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"❌ Error processing workout: {e}")
         try:
             await asyncio.wait_for(
-                update.message.reply_text("❌ Error logging workout. Please try again."),
-                timeout=20.0
+                update.message.reply_text("❌ Error logging workout! Please try again."),
+                timeout=10.0
             )
         except:
             logger.warning("⚠️ Error reply also timed out")
 
 async def setup_webhook():
-    """Set up the webhook with Telegram"""
+    """Setup the webhook"""
     try:
-        # Initialize the application first!
         await application.initialize()
         logger.info("🔧 Application initialized")
         
-        # First delete any existing webhook
+        # Delete any existing webhook
         await application.bot.delete_webhook()
-        logger.info("🗑️ Deleted any existing webhook")
+        logger.info("🗑️ Existing webhook deleted")
         
-        # Set the new webhook
+        # Set new webhook
         await application.bot.set_webhook(url=webhook_url)
         logger.info(f"✅ Webhook set to: {webhook_url}")
         
         # Verify webhook
         webhook_info = await application.bot.get_webhook_info()
-        logger.info(f"📡 Webhook status: {webhook_info.url}")
-        logger.info(f"📊 Pending updates: {webhook_info.pending_update_count}")
-        
-        if webhook_info.last_error_message:
-            logger.warning(f"⚠️ Last webhook error: {webhook_info.last_error_message}")
+        logger.info(f"📡 Webhook verification: {webhook_info.url}")
+        logger.info("✅ Webhook setup complete!")
         
     except Exception as e:
-        logger.error(f"❌ Failed to set webhook: {e}")
+        logger.error(f"❌ Webhook setup failed: {e}")
         raise
 
 async def main_async():
-    """Main async function to set up everything"""
-    logger.info("🚀 Starting Fitness Tracker Bot (TIMEOUT FIXED)...")
-    logger.info(f"🔗 Webhook URL: {webhook_url}")
+    """Main async setup function"""
+    logger.info("🚀 Starting Fitness Bot...")
     
-    # Add handlers
+    # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout))
     
-    # Set up webhook
+    # Setup webhook
     await setup_webhook()
-    logger.info("✅ Webhook setup complete!")
+    logger.info("✅ Bot setup complete!")
 
 def main():
-    # Run the async setup
-    import asyncio
+    # Run async setup
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -236,13 +220,13 @@ def main():
         logger.error(f"❌ Setup failed: {e}")
         exit(1)
     
-    # Start Flask app
+    # Start Flask server
     port = int(os.environ.get('PORT', 10000))
-    logger.info(f"🌐 Starting Flask server on port {port}")
-    logger.info("✅ Bot is ready to receive webhooks!")
+    logger.info(f"🌐 Starting server on port {port}")
+    logger.info("🎯 FITNESS BOT READY!")
     
-    # Run Flask (this keeps the app alive)
     app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == '__main__':
     main()
+
