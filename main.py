@@ -1,5 +1,4 @@
-# Create the TRULY ultra simple version
-ultra_simple_bot = '''import os
+import os
 import json
 import logging
 from datetime import datetime
@@ -48,8 +47,8 @@ def simple_parse(text):
 # Bot handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Simple Workout Bot v1.0\\n\\n"
-        "Send me your workouts and I'll store them!\\n"
+        "🤖 Simple Workout Bot v1.0\n\n"
+        "Send me your workouts and I'll store them!\n"
         "Example: '5 pull ups, 10 pushups'"
     )
 
@@ -65,8 +64,8 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         workouts_storage.append(workout_data)
         
         await update.message.reply_text(
-            f"✅ Workout logged!\\n"
-            f"📝 '{user_input}'\\n"
+            f"✅ Workout logged!\n"
+            f"📝 '{user_input}'\n"
             f"📊 Total workouts: {len(workouts_storage)}"
         )
         
@@ -90,23 +89,10 @@ def main():
     # Start bot
     application = Application.builder().token(bot_token).build()
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT &amp; ~filters.COMMAND, handle_workout))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout))
     
     logger.info("Bot is ready! 🚀")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
-'''
-
-# Save the truly simple version
-with open('/tmp/main_ultra_simple_fixed.py', 'w') as f:
-    f.write(ultra_simple_bot)
-
-print("🚀 CREATED: main_ultra_simple_fixed.py")
-print("This version:")
-print("✅ Only needs 2 packages (telegram + flask)")
-print("✅ No database, no AI")
-print("✅ Just stores workouts in memory")
-print("✅ Should work immediately!")
-print("\nReplace your main.py with this file!")
