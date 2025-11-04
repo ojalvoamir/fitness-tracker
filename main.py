@@ -1,8 +1,8 @@
-import os
+# Let's create a FIXED webhook-only version of your script
+fixed_main_script = '''import os
 import json
 import logging
 from datetime import datetime
-from threading import Thread
 
 # Telegram Bot
 from telegram import Update
@@ -33,8 +33,8 @@ if not webhook_url:
 # Flask app
 app = Flask(__name__)
 
-# Initialize bot application
-application = Application.builder().token(bot_token).build()
+# Initialize bot application - WEBHOOK MODE ONLY
+application = Application.builder().token(bot_token).updater(None).build()
 
 @app.route('/')
 def health_check():
@@ -78,10 +78,10 @@ def simple_parse(text):
 # Bot handlers
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Webhook Workout Bot v2.0\n\n"
-        "Send me your workouts and I'll store them!\n"
-        "Example: '5 pull ups, 10 pushups'\n\n"
-        "✅ Now running with webhooks (Render-compatible)!"
+        "🤖 Webhook Workout Bot v2.1\\n\\n"
+        "Send me your workouts and I'll store them!\\n"
+        "Example: '5 pull ups, 10 pushups'\\n\\n"
+        "✅ Now running with webhooks ONLY (Fixed)!"
     )
 
 async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,8 +96,8 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         workouts_storage.append(workout_data)
         
         await update.message.reply_text(
-            f"✅ Workout logged!\n"
-            f"📝 '{user_input}'\n"
+            f"✅ Workout logged!\\n"
+            f"📝 '{user_input}'\\n"
             f"📊 Total workouts: {len(workouts_storage)}"
         )
         
@@ -110,17 +110,22 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def setup_webhook():
     """Set up the webhook with Telegram"""
     try:
+        # First delete any existing webhook
+        await application.bot.delete_webhook()
+        logger.info("🗑️ Deleted any existing webhook")
+        
+        # Set the new webhook
         await application.bot.set_webhook(url=webhook_url)
         logger.info(f"✅ Webhook set to: {webhook_url}")
     except Exception as e:
         logger.error(f"❌ Failed to set webhook: {e}")
 
 def main():
-    logger.info("🚀 Starting Webhook Workout Bot...")
+    logger.info("🚀 Starting Webhook-Only Workout Bot...")
     
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout))
+    application.add_handler(MessageHandler(filters.TEXT &amp; ~filters.COMMAND, handle_workout))
     
     # Set up webhook
     import asyncio
@@ -133,9 +138,34 @@ def main():
     port = int(os.environ.get('PORT', 10000))
     logger.info(f"🌐 Starting Flask on port {port}")
     logger.info(f"🔗 Webhook URL: {webhook_url}")
-    logger.info("✅ Bot is ready to receive webhooks!")
+    logger.info("✅ Bot is ready to receive webhooks ONLY!")
     
     app.run(host='0.0.0.0', port=port, debug=False)
 
 if __name__ == '__main__':
     main()
+'''
+
+# Save the fixed script
+with open('/tmp/main_webhook_fixed.py', 'w') as f:
+    f.write(fixed_main_script)
+
+print("✅ FIXED SCRIPT CREATED: main_webhook_fixed.py")
+print("\n🔧 KEY FIXES MADE:")
+print("1. Added .updater(None) to Application.builder()")
+print("2. Added webhook deletion before setting new one")
+print("3. Removed any polling references")
+print("4. Pure webhook-only mode")
+
+print("\n🚨 THE PROBLEM WAS:")
+print("• Your Application was still trying to use polling")
+print("• Need to explicitly disable updater with .updater(None)")
+print("• This tells python-telegram-bot to ONLY use webhooks")
+
+print("\n📁 DEPLOYMENT:")
+print("1. Download main_webhook_fixed.py ⬆️")
+print("2. Replace your main.py with this file")
+print("3. Redeploy to Render")
+print("4. Should work perfectly!")
+
+print("\n✅ This version is PURE webhook - no polling conflicts!")
