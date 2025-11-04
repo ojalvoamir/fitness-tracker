@@ -1,9 +1,15 @@
-import os
+# Create the fixed main.py with port binding for Render
+
+print("🔧 FIXED MAIN.PY - COPY THIS TO REPLACE YOUR CURRENT main.py:")
+print("=" * 65)
+
+fixed_main_py = '''import os
 import json
 import re
 from datetime import datetime
 import asyncio
 import logging
+from threading import Thread
 
 # Telegram Bot imports
 from telegram import Update
@@ -14,6 +20,9 @@ from supabase import create_client, Client
 
 # Google Gemini imports
 import google.generativeai as genai
+
+# Flask for health check endpoint
+from flask import Flask
 
 # Configure logging
 logging.basicConfig(
@@ -41,13 +50,24 @@ gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
+# Flask app for health check
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "🤖 Fitness Tracker Bot is running!", 200
+
+@app.route('/health')
+def health():
+    return {"status": "healthy", "bot": "running"}, 200
+
 class WorkoutLogger:
     def __init__(self):
         self.supabase = supabase
         self.gemini_model = gemini_model
         logger.info("WorkoutLogger initialized with Supabase and Gemini")
 
-    def _generate_gemini_prompt(self, user_input: str, current_date: str) -> str:
+    def _generate_gemini_prompt(self, user_input: str, current_date: str) -&gt; str:
         """
         Constructs the detailed prompt for the Gemini model to parse workout data.
         """
@@ -89,7 +109,7 @@ class WorkoutLogger:
         """
         return prompt
 
-    def parse_workout_with_gemini(self, user_input: str, current_date: str = None) -> dict:
+    def parse_workout_with_gemini(self, user_input: str, current_date: str = None) -&gt; dict:
         """
         Calls the Gemini model to parse user input into a structured workout dictionary.
         """
@@ -105,7 +125,7 @@ class WorkoutLogger:
             response_text = response.text
 
             # Extract JSON from response
-            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
+            json_match = re.search(r'```json\\n(.*?)\\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
             else:
@@ -118,13 +138,13 @@ class WorkoutLogger:
             
         except json.JSONDecodeError as e:
             logger.error(f"❌ Error decoding JSON from Gemini response: {e}")
-            logger.error(f"Problematic response text: \n{response_text}")
+            logger.error(f"Problematic response text: \\n{response_text}")
             raise ValueError(f"Gemini response did not contain valid JSON: {e}")
         except Exception as e:
             logger.error(f"❌ An error occurred during Gemini API call: {e}")
             raise
 
-    def log_workout_to_supabase(self, workout_data: dict, user_id: str) -> bool:
+    def log_workout_to_supabase(self, workout_data: dict, user_id: str) -&gt; bool:
         """
         Logs the parsed workout data to Supabase database.
         """
@@ -172,36 +192,36 @@ class WorkoutLogger:
 workout_logger = WorkoutLogger()
 
 # Telegram Bot Handlers
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
     await update.message.reply_html(
-        f"Hi {user.mention_html()}! 👋\n\n"
-        "I'm your AI-powered fitness tracking bot! 🤖💪\n\n"
-        "Send me your workouts in natural language like:\n"
-        "• '5 pull ups, 10 pushups'\n"
-        "• 'ran 3km in 20 minutes'\n"
-        "• 'cindy 5 rounds yesterday'\n"
-        "• 'squats 3x10 at 50kg'\n\n"
+        f"Hi {user.mention_html()}! 👋\\n\\n"
+        "I'm your AI-powered fitness tracking bot! 🤖💪\\n\\n"
+        "Send me your workouts in natural language like:\\n"
+        "• '5 pull ups, 10 pushups'\\n"
+        "• 'ran 3km in 20 minutes'\\n"
+        "• 'cindy 5 rounds yesterday'\\n"
+        "• 'squats 3x10 at 50kg'\\n\\n"
         "I'll understand and log everything automatically!"
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
     """Send a help message when the command /help is issued."""
     await update.message.reply_text(
-        "🤖 AI Workout Logger Help\n\n"
-        "I use Google Gemini AI to understand your workouts!\n\n"
-        "Examples of what I understand:\n"
-        "• '5 pull ups, 10 pushups'\n"
-        "• 'ran 3km in 20 min'\n"
-        "• 'squats 3x10 at 50kg, yesterday'\n"
-        "• 'bicep curls 12kg 8 reps 3 sets'\n"
-        "• 'cindy 5 rounds' (CrossFit workout)\n"
-        "• 'deadlifts 100kg 5 reps, bench press 80kg 8 reps'\n\n"
+        "🤖 AI Workout Logger Help\\n\\n"
+        "I use Google Gemini AI to understand your workouts!\\n\\n"
+        "Examples of what I understand:\\n"
+        "• '5 pull ups, 10 pushups'\\n"
+        "• 'ran 3km in 20 min'\\n"
+        "• 'squats 3x10 at 50kg, yesterday'\\n"
+        "• 'bicep curls 12kg 8 reps 3 sets'\\n"
+        "• 'cindy 5 rounds' (CrossFit workout)\\n"
+        "• 'deadlifts 100kg 5 reps, bench press 80kg 8 reps'\\n\\n"
         "Just describe your workout naturally - I'll figure it out! 🧠"
     )
 
-async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
     """Parse and log workout messages using Gemini AI."""
     user_input = update.message.text
     user_id = str(update.effective_user.id)
@@ -217,7 +237,7 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
         
         if not workout_data.get('exercises') or len(workout_data['exercises']) == 0:
             await thinking_message.edit_text(
-                "🤔 I couldn't find any exercises in that message. Try something like:\n"
+                "🤔 I couldn't find any exercises in that message. Try something like:\\n"
                 "'5 pull ups, 10 pushups' or 'ran 3km in 20 minutes'"
             )
             return
@@ -242,8 +262,8 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
                     if set_data.get('time_sec'):
                         minutes = set_data['time_sec'] // 60
                         seconds = set_data['time_sec'] % 60
-                        if minutes > 0:
-                            parts.append(f"{minutes}m{seconds}s" if seconds > 0 else f"{minutes}m")
+                        if minutes &gt; 0:
+                            parts.append(f"{minutes}m{seconds}s" if seconds &gt; 0 else f"{minutes}m")
                         else:
                             parts.append(f"{seconds}s")
                     
@@ -253,8 +273,8 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
                     exercise_summaries.append(summary)
             
             await thinking_message.edit_text(
-                f"✅ Workout logged successfully!\n\n"
-                f"📅 Date: {workout_data['date']}\n"
+                f"✅ Workout logged successfully!\\n\\n"
+                f"📅 Date: {workout_data['date']}\\n"
                 f"💪 Exercises: {', '.join(exercise_summaries)}"
             )
         else:
@@ -265,7 +285,7 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
     except ValueError as e:
         # Specific error for invalid JSON from Gemini
         await thinking_message.edit_text(
-            f"❌ I had trouble understanding that workout. Could you try rephrasing it?\n"
+            f"❌ I had trouble understanding that workout. Could you try rephrasing it?\\n"
             f"Example: '5 pull ups, 10 pushups'"
         )
         logger.error(f"Error parsing workout: {e}")
@@ -276,8 +296,13 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
         )
         logger.error(f"Unexpected error: {e}")
 
-def main() -> None:
-    """Start the bot."""
+def run_flask():
+    """Run Flask app in a separate thread"""
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def main() -&gt; None:
+    """Start the bot and Flask server."""
     # Get bot token from environment
     bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
     
@@ -285,18 +310,49 @@ def main() -> None:
         logger.error("Missing TELEGRAM_BOT_TOKEN in environment variables")
         return
     
+    # Start Flask server in background thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    logger.info("🌐 Flask health check server started")
+    
     # Create the Application
     application = Application.builder().token(bot_token).build()
 
     # Add handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout_message))
+    application.add_handler(MessageHandler(filters.TEXT &amp; ~filters.COMMAND, handle_workout_message))
 
     # Run the bot
     logger.info("🚀 Starting AI-powered Telegram fitness bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
-    main()
+    main()'''
 
+print(fixed_main_py)
+
+print("\n\n📦 UPDATED REQUIREMENTS.TXT:")
+print("=" * 35)
+
+updated_requirements = '''python-telegram-bot
+supabase
+python-dotenv
+google-generativeai
+flask'''
+
+print(updated_requirements)
+
+print("\n\n🔧 WHAT CHANGED:")
+print("=" * 20)
+
+changes = '''
+✅ Added Flask web server for health checks
+✅ Added routes: / and /health  
+✅ Runs Flask in background thread
+✅ Bot still works exactly the same
+✅ Render will now detect the open port
+'''
+
+print(changes)
