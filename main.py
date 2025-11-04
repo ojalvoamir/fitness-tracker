@@ -1,6 +1,4 @@
-# Let's enhance the WorkoutLogger class to fetch existing exercises and help normalize names
-
-enhanced_workout_logger = '''import os
+import os
 import json
 import re
 from datetime import datetime
@@ -74,7 +72,7 @@ class WorkoutLogger:
         self.CACHE_DURATION = 300  # 5 minutes cache
         logger.info("WorkoutLogger initialized with Supabase and Gemini")
 
-    def get_existing_exercises(self, force_refresh: bool = False) -&gt; List[str]:
+    def get_existing_exercises(self, force_refresh: bool = False) -> List[str]:
         """
         Fetch all unique exercise names from the database.
         Uses caching to avoid repeated database calls.
@@ -84,7 +82,7 @@ class WorkoutLogger:
         # Check if cache is valid
         if (not force_refresh and 
             self._cache_timestamp and 
-            current_time - self._cache_timestamp &lt; self.CACHE_DURATION and
+            current_time - self._cache_timestamp < self.CACHE_DURATION and
             self._exercise_cache):
             logger.info(f"📋 Using cached exercise list ({len(self._exercise_cache)} exercises)")
             return list(self._exercise_cache.keys())
@@ -93,8 +91,8 @@ class WorkoutLogger:
             logger.info("🔄 Fetching exercise names from database...")
             
             # Get unique exercise names from exercise_logs table
-            result = self.supabase.table('exercise_logs')\\
-                .select('exercise_name')\\
+            result = self.supabase.table('exercise_logs')\
+                .select('exercise_name')\
                 .execute()
             
             # Extract unique exercise names
@@ -115,7 +113,7 @@ class WorkoutLogger:
             # Return cached data if available, otherwise empty list
             return list(self._exercise_cache.keys()) if self._exercise_cache else []
 
-    def find_closest_exercise_match(self, input_exercise: str, existing_exercises: List[str]) -&gt; Optional[str]:
+    def find_closest_exercise_match(self, input_exercise: str, existing_exercises: List[str]) -> Optional[str]:
         """
         Find the closest matching exercise name from existing exercises.
         Uses simple string matching logic.
@@ -141,7 +139,7 @@ class WorkoutLogger:
         
         return None
 
-    def _generate_gemini_prompt(self, user_input: str, current_date: str, existing_exercises: List[str]) -&gt; str:
+    def _generate_gemini_prompt(self, user_input: str, current_date: str, existing_exercises: List[str]) -> str:
         """
         Enhanced prompt that includes existing exercises for better normalization.
         """
@@ -201,7 +199,7 @@ IMPORTANT: If the user's exercise matches any from the list above (even with dif
         """
         return prompt
 
-    def parse_workout_with_gemini(self, user_input: str, current_date: str = None) -&gt; dict:
+    def parse_workout_with_gemini(self, user_input: str, current_date: str = None) -> dict:
         """
         Enhanced parsing that uses existing exercises for better normalization.
         """
@@ -221,7 +219,7 @@ IMPORTANT: If the user's exercise matches any from the list above (even with dif
             response_text = response.text
 
             # Extract JSON from response
-            json_match = re.search(r'```json\\n(.*?)\\n```', response_text, re.DOTALL)
+            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
             else:
@@ -238,7 +236,7 @@ IMPORTANT: If the user's exercise matches any from the list above (even with dif
             
         except json.JSONDecodeError as e:
             logger.error(f"❌ Error decoding JSON from Gemini response: {e}")
-            logger.error(f"Problematic response text: \\n{response_text}")
+            logger.error(f"Problematic response text: \n{response_text}")
             raise ValueError(f"Gemini response did not contain valid JSON: {e}")
         except Exception as e:
             logger.error(f"❌ An error occurred during Gemini API call: {e}")
@@ -261,7 +259,7 @@ IMPORTANT: If the user's exercise matches any from the list above (even with dif
                 # Keep original name but normalize it
                 exercise["name"] = original_name.lower().strip()
 
-    def log_workout_to_supabase(self, workout_data: dict, user_id: str) -&gt; bool:
+    def log_workout_to_supabase(self, workout_data: dict, user_id: str) -> bool:
         """
         Logs the parsed workout data to Supabase database.
         """
@@ -313,41 +311,41 @@ IMPORTANT: If the user's exercise matches any from the list above (even with dif
 workout_logger = WorkoutLogger()
 
 # Telegram Bot Handlers
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
     await update.message.reply_html(
-        f"Hi {user.mention_html()}! 👋\\n\\n"
-        "I'm your AI-powered fitness tracking bot! 🤖💪\\n\\n"
-        "Send me your workouts in natural language like:\\n"
-        "• '5 pull ups, 10 pushups'\\n"
-        "• 'ran 3km in 20 minutes'\\n"
-        "• 'cindy 5 rounds yesterday'\\n"
-        "• 'squats 3x10 at 50kg'\\n\\n"
-        "I'll understand and log everything automatically!\\n\\n"
+        f"Hi {user.mention_html()}! 👋\n\n"
+        "I'm your AI-powered fitness tracking bot! 🤖💪\n\n"
+        "Send me your workouts in natural language like:\n"
+        "• '5 pull ups, 10 pushups'\n"
+        "• 'ran 3km in 20 minutes'\n"
+        "• 'cindy 5 rounds yesterday'\n"
+        "• 'squats 3x10 at 50kg'\n\n"
+        "I'll understand and log everything automatically!\n\n"
         "💡 I also remember your previous exercises to keep naming consistent!"
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a help message when the command /help is issued."""
     await update.message.reply_text(
-        "🤖 AI Workout Logger Help\\n\\n"
-        "I use Google Gemini AI to understand your workouts!\\n\\n"
-        "Examples of what I understand:\\n"
-        "• '5 pull ups, 10 pushups'\\n"
-        "• 'ran 3km in 20 min'\\n"
-        "• 'squats 3x10 at 50kg, yesterday'\\n"
-        "• 'bicep curls 12kg 8 reps 3 sets'\\n"
-        "• 'cindy 5 rounds' (CrossFit workout)\\n"
-        "• 'deadlifts 100kg 5 reps, bench press 80kg 8 reps'\\n\\n"
-        "🎯 Smart Features:\\n"
-        "• I remember your previous exercises\\n"
-        "• I keep exercise names consistent\\n"
-        "• I understand dates like 'yesterday', 'today'\\n\\n"
+        "🤖 AI Workout Logger Help\n\n"
+        "I use Google Gemini AI to understand your workouts!\n\n"
+        "Examples of what I understand:\n"
+        "• '5 pull ups, 10 pushups'\n"
+        "• 'ran 3km in 20 min'\n"
+        "• 'squats 3x10 at 50kg, yesterday'\n"
+        "• 'bicep curls 12kg 8 reps 3 sets'\n"
+        "• 'cindy 5 rounds' (CrossFit workout)\n"
+        "• 'deadlifts 100kg 5 reps, bench press 80kg 8 reps'\n\n"
+        "🎯 Smart Features:\n"
+        "• I remember your previous exercises\n"
+        "• I keep exercise names consistent\n"
+        "• I understand dates like 'yesterday', 'today'\n\n"
         "Just describe your workout naturally - I'll figure it out! 🧠"
     )
 
-async def exercises_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
+async def exercises_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show user their logged exercises."""
     try:
         exercises = workout_logger.get_existing_exercises(force_refresh=True)
@@ -358,12 +356,12 @@ async def exercises_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         # Limit to first 20 exercises to avoid message being too long
         display_exercises = exercises[:20]
-        exercise_list = "\\n".join([f"• {ex.title()}" for ex in sorted(display_exercises)])
+        exercise_list = "\n".join([f"• {ex.title()}" for ex in sorted(display_exercises)])
         
-        message = f"📋 Your Logged Exercises ({len(exercises)} total):\\n\\n{exercise_list}"
+        message = f"📋 Your Logged Exercises ({len(exercises)} total):\n\n{exercise_list}"
         
-        if len(exercises) &gt; 20:
-            message += f"\\n\\n... and {len(exercises) - 20} more!"
+        if len(exercises) > 20:
+            message += f"\n\n... and {len(exercises) - 20} more!"
         
         await update.message.reply_text(message)
         
@@ -371,7 +369,7 @@ async def exercises_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.error(f"Error fetching exercises: {e}")
         await update.message.reply_text("❌ Error fetching your exercises. Please try again.")
 
-async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -&gt; None:
+async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Parse and log workout messages using Gemini AI with exercise normalization."""
     user_input = update.message.text
     user_id = str(update.effective_user.id)
@@ -387,7 +385,7 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
         
         if not workout_data.get('exercises') or len(workout_data['exercises']) == 0:
             await thinking_message.edit_text(
-                "🤔 I couldn't find any exercises in that message. Try something like:\\n"
+                "🤔 I couldn't find any exercises in that message. Try something like:\n"
                 "'5 pull ups, 10 pushups' or 'ran 3km in 20 minutes'"
             )
             return
@@ -412,8 +410,8 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
                     if set_data.get('time_sec'):
                         minutes = set_data['time_sec'] // 60
                         seconds = set_data['time_sec'] % 60
-                        if minutes &gt; 0:
-                            parts.append(f"{minutes}m{seconds}s" if seconds &gt; 0 else f"{minutes}m")
+                        if minutes > 0:
+                            parts.append(f"{minutes}m{seconds}s" if seconds > 0 else f"{minutes}m")
                         else:
                             parts.append(f"{seconds}s")
                     
@@ -423,8 +421,8 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
                     exercise_summaries.append(summary)
             
             await thinking_message.edit_text(
-                f"✅ Workout logged successfully!\\n\\n"
-                f"📅 Date: {workout_data['date']}\\n"
+                f"✅ Workout logged successfully!\n\n"
+                f"📅 Date: {workout_data['date']}\n"
                 f"💪 Exercises: {', '.join(exercise_summaries)}"
             )
         else:
@@ -434,7 +432,7 @@ async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_T
             
     except ValueError as e:
         await thinking_message.edit_text(
-            f"❌ I had trouble understanding that workout. Could you try rephrasing it?\\n"
+            f"❌ I had trouble understanding that workout. Could you try rephrasing it?\n"
             f"Example: '5 pull ups, 10 pushups'"
         )
         logger.error(f"Error parsing workout: {e}")
@@ -449,7 +447,7 @@ def run_flask():
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-def main() -&gt; None:
+def main() -> None:
     """Start the bot and Flask server."""
     # Get bot token from environment
     bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -471,7 +469,7 @@ def main() -&gt; None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("exercises", exercises_command))  # NEW COMMAND
-    application.add_handler(MessageHandler(filters.TEXT &amp; ~filters.COMMAND, handle_workout_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout_message))
 
     # Run the bot
     logger.info("🚀 Starting AI-powered Telegram fitness bot with exercise normalization...")
@@ -479,21 +477,3 @@ def main() -&gt; None:
 
 if __name__ == '__main__':
     main()
-'''
-
-# Save the enhanced version
-with open('/tmp/main_enhanced.py', 'w') as f:
-    f.write(enhanced_workout_logger)
-
-print("✅ Enhanced WorkoutLogger with exercise normalization created!")
-print("\n🎯 NEW FEATURES:")
-print("• Fetches existing exercises from database")
-print("• Uses them in Gemini prompt for better normalization") 
-print("• Post-processes results to match existing names")
-print("• Caches exercise list (5min) to avoid repeated DB calls")
-print("• New /exercises command to see logged exercises")
-print("• Smart matching (handles variations like 'pullup' vs 'pull-up')")
-print("\n📊 BENEFITS:")
-print("• Consistent exercise naming across all logs")
-print("• Better data analysis and tracking")
-print("• Reduces duplicate exercises with slight name differences")
