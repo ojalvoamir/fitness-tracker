@@ -12,6 +12,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 # Supabase imports
 from supabase import create_client, Client
 
+# Google Gemini imports
+import google.generativeai as genai
+
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -22,84 +25,147 @@ logger = logging.getLogger(__name__)
 # Initialize Supabase client
 supabase_url = os.environ.get('SUPABASE_URL')
 supabase_key = os.environ.get('SUPABASE_KEY')
+google_api_key = os.environ.get('GOOGLE_API_KEY')
 
 if not supabase_url or not supabase_key:
     logger.error("Missing Supabase credentials in environment variables")
     exit(1)
+
+if not google_api_key:
+    logger.error("Missing Google API key in environment variables")
+    exit(1)
+
+# Configure Gemini
+genai.configure(api_key=google_api_key)
+gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
 
 supabase: Client = create_client(supabase_url, supabase_key)
 
 class WorkoutLogger:
     def __init__(self):
         self.supabase = supabase
-        logger.info("WorkoutLogger initialized with Supabase connection")
+        self.gemini_model = gemini_model
+        logger.info("WorkoutLogger initialized with Supabase and Gemini")
 
-    def parse_workout_simple(self, user_input: str) -> dict:
+    def _generate_gemini_prompt(self, user_input: str, current_date: str) -> str:
         """
-        Simple workout parser - we'll upgrade this to use LLM later
-        For now, handles basic patterns like "5 pull ups, 10 pushups"
+        Constructs the detailed prompt for the Gemini model to parse workout data.
         """
-        today = datetime.now().strftime('%Y-%m-%d')
-        
-        # Simple regex patterns for common exercises
-        exercises = []
-        
-        # Pattern: number + exercise name
-        patterns = [
-            r'(\d+)\s+(pull\s*ups?|pullups?)',
-            r'(\d+)\s+(push\s*ups?|pushups?)',
-            r'(\d+)\s+(squats?)',
-            r'(\d+)\s+(burpees?)',
-            r'(\d+)\s+(sit\s*ups?|situps?)',
-        ]
-        
-        for pattern in patterns:
-            matches = re.findall(pattern, user_input.lower())
-            for match in matches:
-                reps = int(match[0])
-                exercise_name = match[1].replace(' ', '-')
-                exercises.append({
-                    'name': exercise_name,
-                    'reps': reps,
-                    'sets': 1
-                })
-        
-        return {
-            'date': today,
-            'exercises': exercises
-        }
+        date_context = f"Today's date is {current_date}. " if current_date else ""
+        prompt = f"""
+        {date_context}Convert the following workout description into structured JSON.
+        Extract the date from the input if specified (e.g., 'today', 'yesterday', or other date inputs in different formats) and include it in the top-level 'date' field in 'YYYY-MM-DD' format. If no date is specified, use today's date.
+        Return ONLY the JSON and no additional text or explanations.
+        If the same exercise is entered multiple times, log it with the successive set number. Keep the order of exercises same as input and do not group exercises together.
+        Use the most common and correct ways of spelling the exercise names to ensure consistency (e.g. if the input is pullup or pl-up, log it as pull-up).
 
-    def log_workout(self, workout_data: dict, user_id: str) -> bool:
+        # --- Special Handling for 'Cindy' Workout ---
+        If the input describes a 'Cindy' workout (e.g., 'cindy, 5 rounds'), record the number of rounds completed in the 'rounds' field. For 'Cindy' workouts, the 'reps' field should be null. The 'time_sec' for a Cindy workout should default to 1200 (20 minutes) unless a different time is explicitly mentioned in the input.
+
+        Input: "{user_input}"
+
+        Output format:
+        ```json
+        {{
+          "date": "YYYY-MM-DD",
+          "exercises": [
+            {{
+              "name": "Exercise Name",
+              "sets": [
+                {{
+                  "set_id": 1,
+                  "kg": null,
+                  "reps": null,
+                  "rounds": null,
+                  "distance_km": null,
+                  "time_sec": null,
+                  "size_cm": null
+                }}
+              ]
+            }}
+          ]
+        }}
+        ```
         """
-        Log workout to Supabase database
+        return prompt
+
+    def parse_workout_with_gemini(self, user_input: str, current_date: str = None) -> dict:
         """
+        Calls the Gemini model to parse user input into a structured workout dictionary.
+        """
+        if current_date is None:
+            current_date = datetime.now().strftime('%Y-%m-%d')
+
+        logger.info(f"🤖 Sending prompt to Gemini for input: '{user_input}'")
+
         try:
-            for exercise in workout_data['exercises']:
-                # Insert into workouts table
-                workout_result = self.supabase.table('workouts').insert({
-                    'user_id': user_id,
-                    'date': workout_data['date'],
-                    'notes': f"Logged via Telegram bot"
-                }).execute()
-                
-                workout_id = workout_result.data[0]['id']
-                
-                # Insert into exercise_logs table
-                self.supabase.table('exercise_logs').insert({
-                    'workout_id': workout_id,
-                    'exercise_name': exercise['name'],
-                    'sets': exercise['sets'],
-                    'reps': exercise['reps'],
-                    'weight_kg': None,
-                    'distance_km': None,
-                    'time_seconds': None
-                }).execute()
+            response = self.gemini_model.generate_content(
+                self._generate_gemini_prompt(user_input, current_date)
+            )
+            response_text = response.text
+
+            # Extract JSON from response
+            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
+            if json_match:
+                json_string = json_match.group(1).strip()
+            else:
+                json_string = response_text.strip()
+                logger.warning("⚠️ Gemini response did not contain a ```json block. Attempting to parse raw response.")
+
+            parsed_data = json.loads(json_string)
+            logger.info("✅ Successfully parsed JSON from Gemini response.")
+            return parsed_data
             
-            logger.info(f"Successfully logged workout for user {user_id}")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Error decoding JSON from Gemini response: {e}")
+            logger.error(f"Problematic response text: \n{response_text}")
+            raise ValueError(f"Gemini response did not contain valid JSON: {e}")
+        except Exception as e:
+            logger.error(f"❌ An error occurred during Gemini API call: {e}")
+            raise
+
+    def log_workout_to_supabase(self, workout_data: dict, user_id: str) -> bool:
+        """
+        Logs the parsed workout data to Supabase database.
+        """
+        logger.info(f"📝 Logging workout data to Supabase for user {user_id}")
+        
+        try:
+            log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
+
+            for exercise in workout_data.get("exercises", []):
+                exercise_name = exercise.get("name", "Unknown Exercise")
+                
+                for set_data in exercise.get("sets", []):
+                    # Insert into workouts table first
+                    workout_result = self.supabase.table('workouts').insert({
+                        'user_id': user_id,
+                        'date': log_date,
+                        'notes': f"Logged via Telegram bot: {exercise_name}"
+                    }).execute()
+                    
+                    workout_id = workout_result.data[0]['id']
+                    
+                    # Prepare exercise log data
+                    exercise_log = {
+                        'workout_id': workout_id,
+                        'exercise_name': exercise_name,
+                        'set_number': set_data.get("set_id", 1),
+                        'reps': set_data.get("reps"),
+                        'weight_kg': set_data.get("kg"),
+                        'distance_km': set_data.get("distance_km"),
+                        'time_seconds': set_data.get("time_sec"),
+                        'rounds': set_data.get("rounds")
+                    }
+                    
+                    # Insert into exercise_logs table
+                    self.supabase.table('exercise_logs').insert(exercise_log).execute()
+
+            logger.info(f"✅ Successfully logged workout for user {user_id}")
             return True
             
         except Exception as e:
-            logger.error(f"Error logging workout: {e}")
+            logger.error(f"❌ Error logging workout to Supabase: {e}")
             return False
 
 # Initialize workout logger
@@ -111,63 +177,104 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     await update.message.reply_html(
         f"Hi {user.mention_html()}! 👋\n\n"
-        "I'm your fitness tracking bot! Send me your workouts like:\n"
+        "I'm your AI-powered fitness tracking bot! 🤖💪\n\n"
+        "Send me your workouts in natural language like:\n"
         "• '5 pull ups, 10 pushups'\n"
-        "• '20 squats, 15 burpees'\n\n"
-        "I'll log them to your database automatically!"
+        "• 'ran 3km in 20 minutes'\n"
+        "• 'cindy 5 rounds yesterday'\n"
+        "• 'squats 3x10 at 50kg'\n\n"
+        "I'll understand and log everything automatically!"
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a help message when the command /help is issued."""
     await update.message.reply_text(
-        "💪 How to use me:\n\n"
-        "Just type your workout and I'll log it!\n\n"
-        "Examples:\n"
-        "• 5 pull ups, 10 pushups\n"
-        "• 20 squats\n"
-        "• 15 burpees, 30 sit ups\n\n"
-        "I'll automatically save everything to your database."
+        "🤖 AI Workout Logger Help\n\n"
+        "I use Google Gemini AI to understand your workouts!\n\n"
+        "Examples of what I understand:\n"
+        "• '5 pull ups, 10 pushups'\n"
+        "• 'ran 3km in 20 min'\n"
+        "• 'squats 3x10 at 50kg, yesterday'\n"
+        "• 'bicep curls 12kg 8 reps 3 sets'\n"
+        "• 'cindy 5 rounds' (CrossFit workout)\n"
+        "• 'deadlifts 100kg 5 reps, bench press 80kg 8 reps'\n\n"
+        "Just describe your workout naturally - I'll figure it out! 🧠"
     )
 
 async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Parse and log workout messages."""
+    """Parse and log workout messages using Gemini AI."""
     user_input = update.message.text
     user_id = str(update.effective_user.id)
     
     logger.info(f"Received workout from {update.effective_user.first_name}: {user_input}")
     
+    # Send "thinking" message
+    thinking_message = await update.message.reply_text("🤖 Analyzing your workout...")
+    
     try:
-        # Parse the workout
-        workout_data = workout_logger.parse_workout_simple(user_input)
+        # Parse the workout using Gemini
+        workout_data = workout_logger.parse_workout_with_gemini(user_input)
         
-        if not workout_data['exercises']:
-            await update.message.reply_text(
+        if not workout_data.get('exercises') or len(workout_data['exercises']) == 0:
+            await thinking_message.edit_text(
                 "🤔 I couldn't find any exercises in that message. Try something like:\n"
-                "'5 pull ups, 10 pushups'"
+                "'5 pull ups, 10 pushups' or 'ran 3km in 20 minutes'"
             )
             return
         
-        # Log to database
-        success = workout_logger.log_workout(workout_data, user_id)
+        # Log to Supabase
+        success = workout_logger.log_workout_to_supabase(workout_data, user_id)
         
         if success:
-            exercise_summary = ", ".join([
-                f"{ex['reps']} {ex['name']}" for ex in workout_data['exercises']
-            ])
-            await update.message.reply_text(
-                f"✅ Logged: {exercise_summary}\n"
-                f"Date: {workout_data['date']}"
+            # Create summary of logged exercises
+            exercise_summaries = []
+            for exercise in workout_data['exercises']:
+                for set_data in exercise['sets']:
+                    parts = []
+                    if set_data.get('reps'):
+                        parts.append(f"{set_data['reps']} reps")
+                    if set_data.get('kg'):
+                        parts.append(f"{set_data['kg']}kg")
+                    if set_data.get('rounds'):
+                        parts.append(f"{set_data['rounds']} rounds")
+                    if set_data.get('distance_km'):
+                        parts.append(f"{set_data['distance_km']}km")
+                    if set_data.get('time_sec'):
+                        minutes = set_data['time_sec'] // 60
+                        seconds = set_data['time_sec'] % 60
+                        if minutes > 0:
+                            parts.append(f"{minutes}m{seconds}s" if seconds > 0 else f"{minutes}m")
+                        else:
+                            parts.append(f"{seconds}s")
+                    
+                    summary = f"{exercise['name']}"
+                    if parts:
+                        summary += f" ({', '.join(parts)})"
+                    exercise_summaries.append(summary)
+            
+            await thinking_message.edit_text(
+                f"✅ Workout logged successfully!\n\n"
+                f"📅 Date: {workout_data['date']}\n"
+                f"💪 Exercises: {', '.join(exercise_summaries)}"
             )
         else:
-            await update.message.reply_text(
-                "❌ Sorry, there was an error logging your workout. Please try again."
+            await thinking_message.edit_text(
+                "❌ Sorry, there was an error saving your workout to the database. Please try again."
             )
             
-    except Exception as e:
-        logger.error(f"Error handling workout message: {e}")
-        await update.message.reply_text(
-            "❌ Something went wrong. Please try again or contact support."
+    except ValueError as e:
+        # Specific error for invalid JSON from Gemini
+        await thinking_message.edit_text(
+            f"❌ I had trouble understanding that workout. Could you try rephrasing it?\n"
+            f"Example: '5 pull ups, 10 pushups'"
         )
+        logger.error(f"Error parsing workout: {e}")
+    except Exception as e:
+        # General error for any other unexpected issues
+        await thinking_message.edit_text(
+            f"❌ Something went wrong while processing your workout. Please try again."
+        )
+        logger.error(f"Unexpected error: {e}")
 
 def main() -> None:
     """Start the bot."""
@@ -187,8 +294,9 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout_message))
 
     # Run the bot
-    logger.info("Starting Telegram bot...")
+    logger.info("🚀 Starting AI-powered Telegram fitness bot...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
+
