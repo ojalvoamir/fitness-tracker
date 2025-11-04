@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-import asyncio  # ← THIS WAS MISSING!
+import asyncio
 from datetime import datetime
 
 # Telegram Bot
@@ -45,12 +45,12 @@ application = Application.builder().token(bot_token).updater(None).request(reque
 @app.route('/')
 def health_check():
     return f"""
-    ✅ Fitness Bot is running!
+    ✅ Fitness Bot v3.2 - Event Loop Fixed!
     📊 Logged {len(workouts_storage)} workouts
     🔗 Webhook calls: {len(webhook_logs)}
     🕐 Last: {webhook_logs[-1]['timestamp'] if webhook_logs else 'None'}
     
-    🐛 BUG FIXED: asyncio import added!
+    🔧 FIXED: Event loop management!
     """, 200
 
 @app.route('/workouts')
@@ -63,14 +63,13 @@ def show_webhook_logs():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Handle incoming webhook from Telegram"""
+    """Handle incoming webhook from Telegram - FIXED VERSION"""
     try:
         # Log the webhook call
         webhook_data = {
             "timestamp": datetime.now().isoformat(),
             "method": request.method,
-            "data": request.get_json() if request.is_json else None,
-            "headers": dict(request.headers)
+            "data": request.get_json() if request.is_json else None
         }
         webhook_logs.append(webhook_data)
         
@@ -82,20 +81,28 @@ def webhook():
             update = Update.de_json(update_data, application.bot)
             logger.info(f"🔄 Processing update: {update.update_id}")
             
-            # Process the update with timeout handling
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # FIXED: Better event loop handling
             try:
-                loop.run_until_complete(
+                # Try to get existing loop, create new one if needed
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("Loop is closed")
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Process update without closing loop immediately
+                task = loop.create_task(
                     asyncio.wait_for(application.process_update(update), timeout=30.0)
                 )
+                loop.run_until_complete(task)
                 logger.info("✅ Update processed successfully")
+                
             except asyncio.TimeoutError:
                 logger.warning("⚠️ Update processing timed out, but continuing...")
             except Exception as e:
                 logger.error(f"❌ Error processing update: {e}")
-            finally:
-                loop.close()
             
         return "OK", 200
     except Exception as e:
@@ -110,25 +117,21 @@ def simple_parse(text):
         "timestamp": datetime.now().isoformat()
     }
 
-# Bot handlers
+# Bot handlers - SIMPLIFIED to avoid loop issues
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📱 /start command from {update.effective_user.id}")
     try:
-        await asyncio.wait_for(
-            update.message.reply_text(
-                "🚀 Fitness Bot v3.1 - Bug Fixed!\n\n"
-                "💪 Send me your workouts and I'll log them!\n\n"
-                "Examples:\n"
-                "• '5 pull ups'\n"
-                "• 'ran 3km in 25 minutes'\n"
-                "• 'squats 60kg x8 x3'\n\n"
-                "🐛 Fixed: asyncio import issue!"
-            ),
-            timeout=20.0
+        # SIMPLIFIED: Direct reply without extra timeout wrapper
+        await update.message.reply_text(
+            "🚀 Fitness Bot v3.2 - Event Loop Fixed!\n\n"
+            "💪 Send me your workouts and I'll log them!\n\n"
+            "Examples:\n"
+            "• '5 pull ups'\n"
+            "• 'ran 3km in 25 minutes'\n"
+            "• 'squats 60kg x8 x3'\n\n"
+            "🔧 Fixed: Event loop issue resolved!"
         )
         logger.info("✅ Start command reply sent")
-    except asyncio.TimeoutError:
-        logger.warning("⚠️ Start command reply timed out")
     except Exception as e:
         logger.error(f"❌ Start command error: {e}")
 
@@ -148,31 +151,22 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         workouts_storage.append(workout_data)
         logger.info(f"✅ Workout logged for {username}")
         
-        # Try to send confirmation with timeout
+        # SIMPLIFIED: Direct reply without extra timeout wrapper
         response_text = (
             f"✅ Workout logged!\n"
             f"💪 {user_input}\n"
             f"📊 Total workouts: {len(workouts_storage)}"
         )
         
-        try:
-            await asyncio.wait_for(
-                update.message.reply_text(response_text),
-                timeout=20.0
-            )
-            logger.info(f"✅ Confirmation sent to {username}")
-        except asyncio.TimeoutError:
-            logger.warning(f"⚠️ Reply to {username} timed out, but workout was logged")
+        await update.message.reply_text(response_text)
+        logger.info(f"✅ Confirmation sent to {username}")
         
     except Exception as e:
         logger.error(f"❌ Error processing workout: {e}")
         try:
-            await asyncio.wait_for(
-                update.message.reply_text("❌ Error logging workout! Please try again."),
-                timeout=10.0
-            )
-        except:
-            logger.warning("⚠️ Error reply also timed out")
+            await update.message.reply_text("❌ Error logging workout! Please try again.")
+        except Exception as reply_error:
+            logger.warning(f"⚠️ Could not send error reply: {reply_error}")
 
 async def setup_webhook():
     """Setup the webhook"""
@@ -203,19 +197,26 @@ async def main_async():
     
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout))
+    application.add_handler(MessageHandler(filters.TEXT &amp; ~filters.COMMAND, handle_workout))
     
     # Setup webhook
     await setup_webhook()
     logger.info("✅ Bot setup complete!")
 
 def main():
-    # Run async setup
+    # FIXED: Better async setup
     try:
+        # Create and set event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
+        # Run setup
         loop.run_until_complete(main_async())
-        loop.close()
+        
+        # Keep loop alive for webhook processing
+        # DON'T close the loop here!
+        logger.info("🔧 Event loop ready for webhook processing")
+        
     except Exception as e:
         logger.error(f"❌ Setup failed: {e}")
         exit(1)
@@ -229,4 +230,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
