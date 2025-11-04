@@ -3,9 +3,10 @@ import json
 import logging
 from datetime import datetime
 
-# Telegram Bot
+# Telegram Bot with connection pool settings
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.request import HTTPXRequest
 
 # Flask for webhooks and health check
 from flask import Flask, request, jsonify
@@ -33,8 +34,15 @@ if not webhook_url:
 # Flask app
 app = Flask(__name__)
 
-# Initialize bot application - WEBHOOK MODE ONLY
-application = Application.builder().token(bot_token).updater(None).build()
+# FIXED: Initialize bot with larger connection pool and timeout settings
+request_handler = HTTPXRequest(
+    connection_pool_size=20,  # Increased from default 8
+    pool_timeout=30.0,        # Increased timeout
+    read_timeout=30.0,        # Increased read timeout
+    write_timeout=30.0        # Increased write timeout
+)
+
+application = Application.builder().token(bot_token).updater(None).request(request_handler).build()
 
 @app.route('/')
 def health_check():
@@ -78,13 +86,20 @@ def webhook():
             update = Update.de_json(update_data, application.bot)
             logger.info(f"🔄 Processing update: {update.update_id}")
             
-            # Process the update - SYNCHRONOUS VERSION
+            # Process the update - SYNCHRONOUS VERSION with timeout handling
             import asyncio
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(application.process_update(update))
+                # FIXED: Add timeout to prevent hanging
+                loop.run_until_complete(
+                    asyncio.wait_for(application.process_update(update), timeout=25.0)
+                )
                 logger.info("✅ Update processed successfully")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Update processing timed out, but continuing...")
+            except Exception as e:
+                logger.error(f"❌ Error processing update: {e}")
             finally:
                 loop.close()
             
@@ -106,18 +121,26 @@ def simple_parse(text):
         "timestamp": datetime.now().isoformat()
     }
 
-# Bot handlers
+# Bot handlers with timeout protection
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📱 /start command from user {update.effective_user.id}")
-    await update.message.reply_text(
-        "🤖 Fitness Tracker Bot v3.3 (WORKING!)\n\n"
-        "Send me your workouts and I'll log them!\n"
-        "Examples:\n"
-        "• '5 pull ups, 10 pushups'\n"
-        "• 'ran 3km in 20 minutes'\n"
-        "• 'squats 3x8 at 60kg'\n\n"
-        "✅ Finally working properly!"
-    )
+    try:
+        await asyncio.wait_for(
+            update.message.reply_text(
+                "🤖 Fitness Tracker Bot v3.4 (TIMEOUT FIXED!)\n\n"
+                "Send me your workouts and I'll log them!\n"
+                "Examples:\n"
+                "• '5 pull ups, 10 pushups'\n"
+                "• 'ran 3km in 20 minutes'\n"
+                "• 'squats 3x8 at 60kg'\n\n"
+                "✅ Now with better timeout handling!"
+            ),
+            timeout=20.0
+        )
+    except asyncio.TimeoutError:
+        logger.warning("⚠️ Start command reply timed out")
+    except Exception as e:
+        logger.error(f"❌ Error in start command: {e}")
 
 async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_input = update.message.text
@@ -141,12 +164,25 @@ async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🆔 Update ID: {update.update_id}"
         )
         
-        await update.message.reply_text(response_text)
-        logger.info(f"✅ Response sent to {username}")
+        # FIXED: Add timeout to reply
+        try:
+            await asyncio.wait_for(
+                update.message.reply_text(response_text),
+                timeout=20.0
+            )
+            logger.info(f"✅ Response sent to {username}")
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ Reply to {username} timed out, but workout was logged")
         
     except Exception as e:
         logger.error(f"❌ Error processing workout: {e}")
-        await update.message.reply_text("❌ Error logging workout. Please try again.")
+        try:
+            await asyncio.wait_for(
+                update.message.reply_text("❌ Error logging workout. Please try again."),
+                timeout=20.0
+            )
+        except:
+            logger.warning("⚠️ Error reply also timed out")
 
 async def setup_webhook():
     """Set up the webhook with Telegram"""
@@ -177,7 +213,7 @@ async def setup_webhook():
 
 async def main_async():
     """Main async function to set up everything"""
-    logger.info("🚀 Starting Fitness Tracker Bot (WORKING VERSION)...")
+    logger.info("🚀 Starting Fitness Tracker Bot (TIMEOUT FIXED)...")
     logger.info(f"🔗 Webhook URL: {webhook_url}")
     
     # Add handlers
