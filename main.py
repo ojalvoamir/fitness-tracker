@@ -47,7 +47,6 @@ def health_check():
     🧪 Test endpoints:
     • /workouts - View all workouts
     • /webhook-logs - View webhook call logs
-    • /bot-info - Check bot info
     """, 200
 
 @app.route('/workouts')
@@ -58,26 +57,9 @@ def show_workouts():
 def show_webhook_logs():
     return {"webhook_calls": webhook_logs, "count": len(webhook_logs)}
 
-@app.route('/bot-info')
-async def bot_info():
-    """Check bot information and webhook status"""
-    try:
-        me = await application.bot.get_me()
-        webhook_info = await application.bot.get_webhook_info()
-        return jsonify({
-            "bot_username": me.username,
-            "bot_name": me.first_name,
-            "webhook_url": webhook_info.url,
-            "pending_updates": webhook_info.pending_update_count,
-            "last_error": webhook_info.last_error_message,
-            "max_connections": webhook_info.max_connections
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
 @app.route('/webhook', methods=['POST'])
-async def webhook():
-    """Handle incoming Telegram updates via webhook"""
+def webhook():
+    """Handle incoming Telegram updates via webhook - NON-ASYNC VERSION"""
     try:
         # Log the webhook call
         webhook_logs.append({
@@ -96,9 +78,15 @@ async def webhook():
             update = Update.de_json(update_data, application.bot)
             logger.info(f"🔄 Processing update: {update.update_id}")
             
-            # Process the update asynchronously
-            await application.process_update(update)
-            logger.info("✅ Update processed successfully")
+            # Process the update - SYNCHRONOUS VERSION
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(application.process_update(update))
+                logger.info("✅ Update processed successfully")
+            finally:
+                loop.close()
             
         return "OK", 200
     except Exception as e:
@@ -122,13 +110,13 @@ def simple_parse(text):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📱 /start command from user {update.effective_user.id}")
     await update.message.reply_text(
-        "🤖 Fitness Tracker Bot v3.2 (FIXED)\n\n"
+        "🤖 Fitness Tracker Bot v3.3 (WORKING!)\n\n"
         "Send me your workouts and I'll log them!\n"
         "Examples:\n"
         "• '5 pull ups, 10 pushups'\n"
         "• 'ran 3km in 20 minutes'\n"
         "• 'squats 3x8 at 60kg'\n\n"
-        "✅ Webhooks working properly!"
+        "✅ Finally working properly!"
     )
 
 async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -189,7 +177,7 @@ async def setup_webhook():
 
 async def main_async():
     """Main async function to set up everything"""
-    logger.info("🚀 Starting Fitness Tracker Bot (FIXED VERSION)...")
+    logger.info("🚀 Starting Fitness Tracker Bot (WORKING VERSION)...")
     logger.info(f"🔗 Webhook URL: {webhook_url}")
     
     # Add handlers
