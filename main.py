@@ -290,14 +290,44 @@ def main():
     # Get port from environment (Render provides this)
     port = int(os.getenv('PORT', 8000))
     
-    # Start the bot
-    logger.info(f"Starting bot on port {port}")
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=bot_token,
-        webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_URL')}/{bot_token}"
-    )
+    # Check if we have the webhook URL (for production) or run polling (for development)
+    render_url = os.getenv('RENDER_EXTERNAL_URL')
+    
+    if render_url:
+        # Production: Use webhooks
+        logger.info(f"Starting bot with webhooks on port {port}")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=bot_token,
+            webhook_url=f"https://{render_url}/{bot_token}"
+        )
+    else:
+        # Development: Use polling (but still listen on port for health checks)
+        logger.info(f"Starting bot with polling (development mode) on port {port}")
+        
+        # Start a simple HTTP server for health checks
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import threading
+        
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Bot is running')
+            
+            def log_message(self, format, *args):
+                pass  # Suppress HTTP logs
+        
+        # Start health check server in a separate thread
+        health_server = HTTPServer(("0.0.0.0", port), HealthHandler)
+        health_thread = threading.Thread(target=health_server.serve_forever)
+        health_thread.daemon = True
+        health_thread.start()
+        
+        # Run bot with polling
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
