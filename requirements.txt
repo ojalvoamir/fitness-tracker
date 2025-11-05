@@ -1,4 +1,5 @@
-python-telegram-bot==20.7
+python-telegram-bot==20.6
 google-generativeai==0.3.2
-supabase==1.0.4
+supabase==1.0.3
 python-dotenv==1.0.0
+httpx==0.24.1
