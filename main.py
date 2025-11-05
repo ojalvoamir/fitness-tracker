@@ -20,7 +20,7 @@ class FitnessTracker:
     def __init__(self):
         # Initialize Supabase client
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_key = os.getenv('SUPABASE_KEY')  # Changed from SUPABASE_ANON_KEY
         
         if not supabase_url or not supabase_key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables are required")
