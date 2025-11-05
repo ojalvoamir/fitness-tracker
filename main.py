@@ -1,232 +1,303 @@
 import os
 import json
 import logging
-import asyncio
 from datetime import datetime
+from typing import Dict, List, Optional
 
-# Telegram Bot
+import google.generativeai as genai
+from supabase import create_client, Client
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from telegram.request import HTTPXRequest
 
-# Flask for webhooks
-from flask import Flask, request
-
-# Simple storage
-workouts_storage = []
-webhook_logs = []
-
-# Logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# Environment
-bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
-webhook_url = os.environ.get('WEBHOOK_URL')
-
-if not bot_token or not webhook_url:
-    logger.error("❌ Missing environment variables")
-    exit(1)
-
-# Flask app
-app = Flask(__name__)
-
-# Bot setup with reasonable timeouts
-request_handler = HTTPXRequest(
-    connection_pool_size=20,
-    pool_timeout=30.0,
-    read_timeout=30.0,
-    write_timeout=30.0,
-    connect_timeout=10.0
-)
-
-application = Application.builder().token(bot_token).updater(None).request(request_handler).build()
-
-@app.route('/')
-def health_check():
-    return f"""
-    ✅ Fitness Bot v3.4 - FINAL FIX!
-    📊 Logged {len(workouts_storage)} workouts
-    🔗 Webhook calls: {len(webhook_logs)}
-    🕐 Last: {webhook_logs[-1]['timestamp'] if webhook_logs else 'None'}
-    
-    🔧 FIXED: All syntax errors resolved!
-    """, 200
-
-@app.route('/workouts')
-def show_workouts():
-    return {"workouts": workouts_storage, "count": len(workouts_storage)}
-
-@app.route('/webhook-logs')
-def show_webhook_logs():
-    return {"webhook_calls": webhook_logs, "count": len(webhook_logs)}
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Handle incoming webhook from Telegram - FIXED VERSION"""
-    try:
-        # Log the webhook call
-        webhook_data = {
-            "timestamp": datetime.now().isoformat(),
-            "method": request.method,
-            "data": request.get_json() if request.is_json else None
-        }
-        webhook_logs.append(webhook_data)
+class FitnessTracker:
+    def __init__(self):
+        # Initialize Supabase client
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
         
-        logger.info(f"📨 Received webhook: {webhook_data['data']}")
+        if not supabase_url or not supabase_key:
+            raise ValueError("SUPABASE_URL and SUPABASE_ANON_KEY environment variables are required")
         
-        update_data = request.get_json()
+        self.supabase: Client = create_client(supabase_url, supabase_key)
         
-        if update_data:
-            update = Update.de_json(update_data, application.bot)
-            logger.info(f"🔄 Processing update: {update.update_id}")
-            
-            # FIXED: Better event loop handling
-            try:
-                # Try to get existing loop, create new one if needed
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_closed():
-                        raise RuntimeError("Loop is closed")
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                # Process update without closing loop immediately
-                task = loop.create_task(
-                    asyncio.wait_for(application.process_update(update), timeout=30.0)
-                )
-                loop.run_until_complete(task)
-                logger.info("✅ Update processed successfully")
-                
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ Update processing timed out, but continuing...")
-            except Exception as e:
-                logger.error(f"❌ Error processing update: {e}")
-            
-        return "OK", 200
-    except Exception as e:
-        logger.error(f"❌ Webhook error: {e}")
-        return "Error", 500
+        # Initialize Gemini
+        gemini_api_key = os.getenv('GEMINI_API_KEY')
+        if not gemini_api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is required")
+        
+        genai.configure(api_key=gemini_api_key)
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        logger.info("FitnessTracker initialized successfully")
 
-# Simple parser
-def simple_parse(text):
-    return {
-        "date": datetime.now().strftime('%Y-%m-%d'),
-        "text": text,
-        "timestamp": datetime.now().isoformat()
-    }
-
-# Bot handlers - SIMPLIFIED to avoid loop issues
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"📱 /start command from {update.effective_user.id}")
-    try:
-        # SIMPLIFIED: Direct reply without extra timeout wrapper
-        await update.message.reply_text(
-            "🚀 Fitness Bot v3.4 - FINAL VERSION!\n\n"
-            "💪 Send me your workouts and I'll log them!\n\n"
-            "Examples:\n"
-            "• '5 pull ups'\n"
-            "• 'ran 3km in 25 minutes'\n"
-            "• 'squats 60kg x8 x3'\n\n"
-            "🔧 All bugs fixed!"
-        )
-        logger.info("✅ Start command reply sent")
-    except Exception as e:
-        logger.error(f"❌ Start command error: {e}")
-
-async def handle_workout(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
-    user_id = str(update.effective_user.id)
-    username = update.effective_user.first_name or "Unknown"
-    
-    logger.info(f"💪 Workout message from {username}: '{user_input}'")
-    
-    try:
-        # Parse and store the workout
-        workout_data = simple_parse(user_input)
-        workout_data['user_id'] = user_id
-        workout_data['username'] = username
+    def parse_workout_input(self, user_input: str, current_date: str = None) -> Dict:
+        """Parse natural language workout input using Gemini"""
+        if current_date is None:
+            current_date = datetime.now().strftime('%Y-%m-%d')
         
-        workouts_storage.append(workout_data)
-        logger.info(f"✅ Workout logged for {username}")
+        prompt = f"""
+        Today's date is {current_date}. Convert the following workout description into structured JSON.
+        Extract the date from the input if specified, otherwise use today's date.
+        Return ONLY the JSON and no additional text.
         
-        # SIMPLIFIED: Direct reply without extra timeout wrapper
-        response_text = (
-            f"✅ Workout logged!\n"
-            f"💪 {user_input}\n"
-            f"📊 Total workouts: {len(workouts_storage)}"
-        )
+        Use consistent exercise names (e.g., "pull-up" not "pullup" or "pull up").
         
-        await update.message.reply_text(response_text)
-        logger.info(f"✅ Confirmation sent to {username}")
+        Input: "{user_input}"
         
-    except Exception as e:
-        logger.error(f"❌ Error processing workout: {e}")
+        Output format:
+        {{
+          "date": "YYYY-MM-DD",
+          "exercises": [
+            {{
+              "name": "Exercise Name",
+              "sets": [
+                {{
+                  "set_id": 1,
+                  "weight_kg": null,
+                  "reps": null,
+                  "distance_km": null,
+                  "time_seconds": null,
+                  "notes": null
+                }}
+              ]
+            }}
+          ]
+        }}
+        """
+        
         try:
-            await update.message.reply_text("❌ Error logging workout! Please try again.")
-        except Exception as reply_error:
-            logger.warning(f"⚠️ Could not send error reply: {reply_error}")
+            response = self.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Clean up response if it has markdown formatting
+            if response_text.startswith('```json'):
+                response_text = response_text[7:]
+            if response_text.endswith('```'):
+                response_text = response_text[:-3]
+            
+            parsed_data = json.loads(response_text.strip())
+            logger.info(f"Successfully parsed workout: {parsed_data}")
+            return parsed_data
+            
+        except Exception as e:
+            logger.error(f"Error parsing workout input: {e}")
+            raise
 
-async def setup_webhook():
-    """Setup the webhook"""
+    def log_workout_to_supabase(self, workout_data: Dict, user_id: str, username: str, raw_input: str):
+        """Log parsed workout data to Supabase"""
+        try:
+            workout_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
+            
+            for exercise in workout_data.get("exercises", []):
+                exercise_name = exercise.get("name", "Unknown Exercise")
+                
+                for set_data in exercise.get("sets", []):
+                    # Prepare data for insertion
+                    log_entry = {
+                        "date": workout_date,
+                        "exercise_name": exercise_name,
+                        "set_number": set_data.get("set_id", 1),
+                        "weight_kg": set_data.get("weight_kg"),
+                        "reps": set_data.get("reps"),
+                        "distance_km": set_data.get("distance_km"),
+                        "time_seconds": set_data.get("time_seconds"),
+                        "notes": set_data.get("notes"),
+                        "user_id": user_id,
+                        "username": username,
+                        "raw_input": raw_input
+                    }
+                    
+                    # Insert into Supabase
+                    result = self.supabase.table('exercise_logs').insert(log_entry).execute()
+                    logger.info(f"Logged exercise: {exercise_name}")
+            
+            logger.info("Workout logged successfully to Supabase")
+            
+        except Exception as e:
+            logger.error(f"Error logging workout to Supabase: {e}")
+            raise
+
+    def get_recent_workouts(self, user_id: str, limit: int = 5) -> List[Dict]:
+        """Get recent workouts for a user"""
+        try:
+            result = self.supabase.table('exercise_logs')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .order('date', desc=True)\
+                .order('created_at', desc=True)\
+                .limit(limit)\
+                .execute()
+            
+            return result.data
+            
+        except Exception as e:
+            logger.error(f"Error fetching recent workouts: {e}")
+            return []
+
+# Initialize the fitness tracker
+fitness_tracker = FitnessTracker()
+
+# Telegram Bot Handlers
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /start command"""
+    user = update.effective_user
+    welcome_message = f"""
+🏋️ Welcome {user.first_name}!
+
+I'm your personal fitness tracker bot. Just send me your workout descriptions and I'll log them automatically!
+
+Examples:
+• "5 pull ups, 10 push ups"
+• "ran 3km in 20 minutes"
+• "bench press 80kg 3x8"
+• "yesterday: squats 100kg 5x5"
+
+Use /recent to see your last 5 workouts.
+Use /help for more commands.
+    """
+    await update.message.reply_text(welcome_message)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    help_text = """
+🤖 Available Commands:
+
+/start - Welcome message
+/help - Show this help
+/recent - Show your last 5 workouts
+
+📝 How to log workouts:
+Just type your workout in natural language!
+
+Examples:
+• "5 pull ups, 10 push ups"
+• "ran 5km in 30 minutes"
+• "deadlift 120kg 3 sets 5 reps"
+• "yesterday: bench press 80kg 8,8,6 reps"
+• "bicep curls 15kg 12 reps 3 sets"
+
+I'll automatically parse and save your workout data!
+    """
+    await update.message.reply_text(help_text)
+
+async def recent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /recent command"""
+    user_id = str(update.effective_user.id)
+    
     try:
-        await application.initialize()
-        logger.info("🔧 Application initialized")
+        recent_workouts = fitness_tracker.get_recent_workouts(user_id, limit=5)
         
-        # Delete any existing webhook
-        await application.bot.delete_webhook()
-        logger.info("🗑️ Existing webhook deleted")
+        if not recent_workouts:
+            await update.message.reply_text("No workouts found. Start logging by sending me your workout!")
+            return
         
-        # Set new webhook
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info(f"✅ Webhook set to: {webhook_url}")
+        message = "🏋️ Your Recent Workouts:\n\n"
         
-        # Verify webhook
-        webhook_info = await application.bot.get_webhook_info()
-        logger.info(f"📡 Webhook verification: {webhook_info.url}")
-        logger.info("✅ Webhook setup complete!")
+        current_date = None
+        for workout in recent_workouts:
+            workout_date = workout['date']
+            
+            # Add date header if it's a new date
+            if workout_date != current_date:
+                message += f"📅 {workout_date}\n"
+                current_date = workout_date
+            
+            # Format workout entry
+            exercise = workout['exercise_name']
+            details = []
+            
+            if workout['weight_kg']:
+                details.append(f"{workout['weight_kg']}kg")
+            if workout['reps']:
+                details.append(f"{workout['reps']} reps")
+            if workout['distance_km']:
+                details.append(f"{workout['distance_km']}km")
+            if workout['time_seconds']:
+                minutes = workout['time_seconds'] // 60
+                seconds = workout['time_seconds'] % 60
+                if minutes > 0:
+                    details.append(f"{minutes}m {seconds}s" if seconds > 0 else f"{minutes}m")
+                else:
+                    details.append(f"{seconds}s")
+            
+            detail_str = " • ".join(details) if details else ""
+            message += f"  • {exercise}" + (f" ({detail_str})" if detail_str else "") + "\n"
+        
+        await update.message.reply_text(message)
         
     except Exception as e:
-        logger.error(f"❌ Webhook setup failed: {e}")
-        raise
+        logger.error(f"Error in recent_command: {e}")
+        await update.message.reply_text("Sorry, I couldn't fetch your recent workouts. Please try again.")
 
-async def main_async():
-    """Main async setup function"""
-    logger.info("🚀 Starting Fitness Bot...")
+async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle workout input messages"""
+    user = update.effective_user
+    user_id = str(user.id)
+    username = user.first_name or user.username or "Unknown"
+    raw_input = update.message.text
     
-    # Add command handlers - CLEAN SYNTAX!
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout))
-    
-    # Setup webhook
-    await setup_webhook()
-    logger.info("✅ Bot setup complete!")
+    try:
+        # Show typing indicator
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        
+        # Parse the workout
+        parsed_workout = fitness_tracker.parse_workout_input(raw_input)
+        
+        # Log to Supabase
+        fitness_tracker.log_workout_to_supabase(
+            parsed_workout, 
+            user_id, 
+            username, 
+            raw_input
+        )
+        
+        # Send confirmation
+        exercise_count = len(parsed_workout.get("exercises", []))
+        total_sets = sum(len(ex.get("sets", [])) for ex in parsed_workout.get("exercises", []))
+        
+        confirmation = f"✅ Logged {exercise_count} exercise(s) with {total_sets} set(s)!"
+        await update.message.reply_text(confirmation)
+        
+    except Exception as e:
+        logger.error(f"Error handling workout message: {e}")
+        await update.message.reply_text(
+            "Sorry, I had trouble processing that workout. Could you try rephrasing it?"
+        )
 
 def main():
-    # FIXED: Better async setup
-    try:
-        # Create and set event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Run setup
-        loop.run_until_complete(main_async())
-        
-        # Keep loop alive for webhook processing
-        # DON'T close the loop here!
-        logger.info("🔧 Event loop ready for webhook processing")
-        
-    except Exception as e:
-        logger.error(f"❌ Setup failed: {e}")
-        exit(1)
+    """Main function to run the bot"""
+    # Get bot token
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not bot_token:
+        raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
     
-    # Start Flask server
-    port = int(os.environ.get('PORT', 10000))
-    logger.info(f"🌐 Starting server on port {port}")
-    logger.info("🎯 FITNESS BOT READY!")
+    # Create application
+    application = Application.builder().token(bot_token).build()
     
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Add handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("recent", recent_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout_message))
+    
+    # Get port from environment (Render provides this)
+    port = int(os.getenv('PORT', 8000))
+    
+    # Start the bot
+    logger.info(f"Starting bot on port {port}")
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=bot_token,
+        webhook_url=f"https://{os.getenv('RENDER_EXTERNAL_URL')}/{bot_token}"
+    )
 
 if __name__ == '__main__':
     main()
