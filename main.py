@@ -12,8 +12,8 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configuration
-GEMINI_MODEL_NAME = 'gemini-1.5-flash'
+# Configuration - UPDATED TO GEMINI 2.0 FLASH!
+GEMINI_MODEL_NAME = 'gemini-2.0-flash-exp'
 
 # Initialize APIs
 def initialize_apis():
@@ -44,7 +44,7 @@ class WorkoutLogger:
         self.supabase = supabase_client
     
     def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
-        """Generate prompt for Gemini based on your actual schema"""
+        """Generate prompt for Gemini 2.0 based on your actual schema"""
         return f"""
         Today's date is {current_date}.
         Convert the following workout description into structured JSON.
@@ -86,7 +86,7 @@ class WorkoutLogger:
         """
     
     def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
-        """Parse user input using Gemini"""
+        """Parse user input using Gemini 2.0"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
         
