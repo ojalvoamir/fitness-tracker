@@ -113,7 +113,7 @@ class WorkoutLogger:
         self.supabase = supabase_client
         debug_log("✅ WorkoutLogger initialized")
     
-    def generate_gemini_prompt(self, user_input: str, current_date: str, is_edit: bool = False) -&gt; str:
+    def generate_gemini_prompt(self, user_input, current_date, is_edit=False):
         """Generate prompt for Gemini based on input type"""
         debug_log(f"📝 Generating prompt for: '{user_input}' (edit: {is_edit})")
         
@@ -167,7 +167,7 @@ class WorkoutLogger:
             }}
             """
     
-    def parse_input(self, user_input: str, current_date: str = None, is_edit: bool = False) -&gt; dict:
+    def parse_input(self, user_input, current_date=None, is_edit=False):
         """Parse user input using Gemini"""
         debug_log(f"🤖 STARTING PARSE for: '{user_input}'")
         
@@ -205,7 +205,7 @@ class WorkoutLogger:
             debug_log(f"❌ Full traceback: {traceback.format_exc()}")
             raise
     
-    def log_workout(self, workout_data: dict) -&gt; bool:
+    def log_workout(self, workout_data):
         """Log workout data to Supabase"""
         debug_log(f"📝 STARTING WORKOUT LOG")
         debug_log(f"📝 Workout data: {workout_data}")
@@ -261,7 +261,7 @@ class WorkoutLogger:
             debug_log(f"❌ Full traceback: {traceback.format_exc()}")
             return False
     
-    def get_recent_workouts(self, days: int = 7) -&gt; list:
+    def get_recent_workouts(self, days=7):
         """Get recent workout data"""
         debug_log(f"📊 Getting recent workouts (last {days} days)")
         try:
