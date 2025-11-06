@@ -28,11 +28,11 @@ class FitnessTracker:
         self.supabase: Client = create_client(supabase_url, supabase_key)
         
         # Initialize Gemini
-        gemini_api_key = os.getenv('GEMINI_API_KEY')
-        if not gemini_api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is required")
+        google_api_key = os.getenv('GOOGLE_API_KEY')
+        if not google_api_key:
+            raise ValueError("GOOGLE_API_KEY environment variable is required")
         
-        genai.configure(api_key=gemini_api_key)
+        genai.configure(api_key=google_api_key)
         self.model = genai.GenerativeModel('gemini-1.5-flash')
         
         logger.info("FitnessTracker initialized successfully")
