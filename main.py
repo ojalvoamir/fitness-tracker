@@ -37,11 +37,34 @@ def initialize_apis():
 gemini_model, supabase = initialize_apis()
 
 class WorkoutLogger:
-    """Handle workout parsing and logging"""
+    """Handle workout parsing and logging using existing Supabase schema"""
     
     def __init__(self, gemini_model, supabase_client):
         self.gemini_model = gemini_model
         self.supabase = supabase_client
+    
+    def get_or_create_exercise_type(self, exercise_name: str) -> int:
+        """Get exercise_type_id or create new exercise type"""
+        try:
+            # First, try to find existing exercise by canonical name
+            result = self.supabase.table('exercise_types').select('id').eq('canonical_name', exercise_name).execute()
+            
+            if result.data:
+                return result.data[0]['id']
+            
+            # If not found, create new exercise type
+            new_exercise = {
+                'canonical_name': exercise_name,
+                'category': 'general'  # Default category
+            }
+            
+            result = self.supabase.table('exercise_types').insert(new_exercise).execute()
+            return result.data[0]['id']
+            
+        except Exception as e:
+            print(f"Error getting/creating exercise type: {e}")
+            # Return a default ID or create a fallback
+            return 1
     
     def generate_gemini_prompt(self, user_input: str, current_date: str, is_edit: bool = False) -> str:
         """Generate prompt for Gemini based on input type"""
@@ -119,28 +142,70 @@ class WorkoutLogger:
             raise
     
     def log_workout(self, workout_data: dict) -> bool:
-        """Log workout data to Supabase"""
+        """Log workout data to existing Supabase schema"""
         try:
             log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
             
             for exercise in workout_data.get("exercises", []):
                 exercise_name = exercise.get("name", "Unknown Exercise")
                 
+                # Get or create exercise type
+                exercise_type_id = self.get_or_create_exercise_type(exercise_name)
+                
                 for set_data in exercise.get("sets", []):
-                    # Insert into exercise_logs table
-                    data = {
-                        "user_id": "default_user",  # For now, single user
+                    # Insert into exercise_logs table with existing schema
+                    log_entry = {
+                        "user_id": "default_user",
+                        "username": "default_user", 
                         "date": log_date,
-                        "exercise_name": exercise_name,
+                        "exercise_type_id": exercise_type_id,
                         "set_number": set_data.get("set_id", 1),
-                        "weight_kg": set_data.get("weight_kg"),
-                        "reps": set_data.get("reps"),
-                        "distance_km": set_data.get("distance_km"),
-                        "time_seconds": set_data.get("time_seconds"),
-                        "notes": set_data.get("notes")
+                        "notes": set_data.get("notes"),
+                        "raw_input": str(workout_data)  # Store original input for reference
                     }
                     
-                    result = self.supabase.table('exercise_logs').insert(data).execute()
+                    # Insert the main log entry
+                    result = self.supabase.table('exercise_logs').insert(log_entry).execute()
+                    exercise_log_id = result.data[0]['id']
+                    
+                    # Insert metrics into exercise_metrics table
+                    metrics_to_insert = []
+                    
+                    if set_data.get("weight_kg"):
+                        metrics_to_insert.append({
+                            "exercise_log_id": exercise_log_id,
+                            "metric_type": "weight",
+                            "value": float(set_data["weight_kg"]),
+                            "unit": "kg"
+                        })
+                    
+                    if set_data.get("reps"):
+                        metrics_to_insert.append({
+                            "exercise_log_id": exercise_log_id,
+                            "metric_type": "reps",
+                            "value": float(set_data["reps"]),
+                            "unit": "count"
+                        })
+                    
+                    if set_data.get("distance_km"):
+                        metrics_to_insert.append({
+                            "exercise_log_id": exercise_log_id,
+                            "metric_type": "distance",
+                            "value": float(set_data["distance_km"]),
+                            "unit": "km"
+                        })
+                    
+                    if set_data.get("time_seconds"):
+                        metrics_to_insert.append({
+                            "exercise_log_id": exercise_log_id,
+                            "metric_type": "time",
+                            "value": float(set_data["time_seconds"]),
+                            "unit": "seconds"
+                        })
+                    
+                    # Insert all metrics
+                    if metrics_to_insert:
+                        self.supabase.table('exercise_metrics').insert(metrics_to_insert).execute()
                     
             return True
         except Exception as e:
@@ -151,16 +216,17 @@ class WorkoutLogger:
         """Delete the most recent exercise entry"""
         try:
             # Get the latest entry
-            result = self.supabase.table('exercise_logs')\
-                .select('*')\
-                .eq('user_id', 'default_user')\
-                .order('created_at', desc=True)\
-                .limit(1)\
-                .execute()
+            result = self.supabase.table('exercise_logs').select('id').eq('user_id', 'default_user').order('created_at', desc=True).limit(1).execute()
             
             if result.data:
                 latest_id = result.data[0]['id']
+                
+                # Delete associated metrics first
+                self.supabase.table('exercise_metrics').delete().eq('exercise_log_id', latest_id).execute()
+                
+                # Delete the exercise log
                 self.supabase.table('exercise_logs').delete().eq('id', latest_id).execute()
+                
                 return True
             return False
         except Exception as e:
@@ -168,18 +234,42 @@ class WorkoutLogger:
             return False
     
     def get_recent_workouts(self, days: int = 7) -> list:
-        """Get recent workout data"""
+        """Get recent workout data with exercise names"""
         try:
             cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             
-            result = self.supabase.table('exercise_logs')\
-                .select('*')\
-                .eq('user_id', 'default_user')\
-                .gte('date', cutoff_date)\
-                .order('date', desc=True)\
-                .execute()
+            # Get exercise logs with exercise types
+            result = self.supabase.table('exercise_logs').select('*, exercise_types!inner(canonical_name), exercise_metrics(metric_type, value, unit)').eq('user_id', 'default_user').gte('date', cutoff_date).order('created_at', desc=True).execute()
             
-            return result.data
+            # Format the data for display
+            formatted_workouts = []
+            for workout in result.data:
+                # Get exercise name from joined table
+                exercise_name = workout['exercise_types']['canonical_name']
+                
+                # Collect metrics
+                metrics = {}
+                for metric in workout.get('exercise_metrics', []):
+                    metrics[metric['metric_type']] = {
+                        'value': metric['value'],
+                        'unit': metric['unit']
+                    }
+                
+                formatted_workout = {
+                    'id': workout['id'],
+                    'date': workout['date'],
+                    'exercise_name': exercise_name,
+                    'set_number': workout['set_number'],
+                    'weight_kg': metrics.get('weight', {}).get('value'),
+                    'reps': metrics.get('reps', {}).get('value'),
+                    'distance_km': metrics.get('distance', {}).get('value'),
+                    'time_seconds': metrics.get('time', {}).get('value'),
+                    'notes': workout.get('notes')
+                }
+                formatted_workouts.append(formatted_workout)
+            
+            return formatted_workouts
+            
         except Exception as e:
             print(f"Error getting workouts: {e}")
             return []
