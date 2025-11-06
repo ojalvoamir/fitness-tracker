@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import traceback
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, redirect, url_for
 import google.generativeai as genai
@@ -28,9 +29,9 @@ def initialize_apis():
         gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
         print("✅ Gemini API initialized successfully")
         
-        # Supabase - FIXED: Using SUPABASE_KEY instead of SUPABASE_ANON_KEY
+        # Supabase - Using SUPABASE_KEY
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')  # CORRECTED!
+        supabase_key = os.getenv('SUPABASE_KEY')
         
         if not supabase_url:
             raise ValueError("SUPABASE_URL environment variable not found")
@@ -39,6 +40,13 @@ def initialize_apis():
         
         supabase = create_client(supabase_url, supabase_key)
         print("✅ Supabase initialized successfully")
+        
+        # Test Supabase connection
+        try:
+            test_result = supabase.table('exercise_logs').select('count').limit(1).execute()
+            print(f"✅ Supabase connection test successful")
+        except Exception as e:
+            print(f"⚠️ Supabase connection test failed: {e}")
         
         return gemini_model, supabase
     except Exception as e:
@@ -114,35 +122,47 @@ class WorkoutLogger:
             current_date = datetime.now().strftime('%Y-%m-%d')
         
         try:
+            print(f"🤖 STEP 1: Generating prompt for input: '{user_input}'")
             prompt = self.generate_gemini_prompt(user_input, current_date, is_edit)
+            
+            print(f"🤖 STEP 2: Sending request to Gemini...")
             response = self.gemini_model.generate_content(prompt)
             response_text = response.text
+            print(f"🤖 STEP 3: Received response from Gemini: {response_text[:200]}...")
             
             # Extract JSON from response
             json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
+                print(f"🤖 STEP 4: Extracted JSON from code block")
             else:
                 json_string = response_text.strip()
+                print(f"🤖 STEP 4: Using raw response as JSON")
             
+            print(f"🤖 STEP 5: Parsing JSON: {json_string}")
             parsed_data = json.loads(json_string)
             print(f"✅ Successfully parsed: {user_input}")
+            print(f"📊 Parsed data: {parsed_data}")
             return parsed_data
         except Exception as e:
             print(f"❌ Error parsing input '{user_input}': {e}")
+            print(f"❌ Full traceback: {traceback.format_exc()}")
             raise
     
     def log_workout(self, workout_data: dict) -> bool:
         """Log workout data to Supabase"""
         try:
             log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
-            print(f"📝 Logging workout for date: {log_date}")
+            print(f"📝 STEP 1: Starting to log workout for date: {log_date}")
+            print(f"📝 STEP 2: Workout data: {workout_data}")
             
-            for exercise in workout_data.get("exercises", []):
+            for exercise_idx, exercise in enumerate(workout_data.get("exercises", [])):
                 exercise_name = exercise.get("name", "Unknown Exercise")
-                print(f"  Exercise: {exercise_name}")
+                print(f"📝 STEP 3.{exercise_idx + 1}: Processing exercise: {exercise_name}")
                 
-                for set_data in exercise.get("sets", []):
+                for set_idx, set_data in enumerate(exercise.get("sets", [])):
+                    print(f"📝 STEP 4.{set_idx + 1}: Processing set: {set_data}")
+                    
                     # Insert into exercise_logs table
                     data = {
                         "user_id": "default_user",  # For now, single user
@@ -156,14 +176,25 @@ class WorkoutLogger:
                         "notes": set_data.get("notes")
                     }
                     
-                    result = self.supabase.table('exercise_logs').insert(data).execute()
-                    print(f"    Set {set_data.get('set_id', 1)}: {set_data.get('reps', 'N/A')} reps")
+                    print(f"📝 STEP 5.{set_idx + 1}: Inserting data: {data}")
                     
-            print("✅ Workout logged successfully!")
+                    try:
+                        result = self.supabase.table('exercise_logs').insert(data).execute()
+                        print(f"📝 STEP 6.{set_idx + 1}: Insert successful!")
+                        print(f"📝 STEP 6.{set_idx + 1}: Result: {result}")
+                    except Exception as insert_error:
+                        print(f"❌ Insert failed for set {set_idx + 1}: {insert_error}")
+                        print(f"❌ Insert error traceback: {traceback.format_exc()}")
+                        raise insert_error
+                    
+                    print(f"    ✅ Set {set_data.get('set_id', 1)}: {set_data.get('reps', 'N/A')} reps logged")
+                    
+            print("✅ ALL SETS LOGGED SUCCESSFULLY!")
             return True
         except Exception as e:
-            print(f"❌ Error logging workout: {e}")
-            print(f"❌ Workout data: {workout_data}")
+            print(f"❌ CRITICAL ERROR in log_workout: {e}")
+            print(f"❌ Full error traceback: {traceback.format_exc()}")
+            print(f"❌ Failed workout data: {workout_data}")
             return False
     
     def delete_latest_exercise(self) -> bool:
@@ -186,6 +217,7 @@ class WorkoutLogger:
             return False
         except Exception as e:
             print(f"❌ Error deleting exercise: {e}")
+            print(f"❌ Delete error traceback: {traceback.format_exc()}")
             return False
     
     def get_recent_workouts(self, days: int = 7) -> list:
@@ -204,6 +236,7 @@ class WorkoutLogger:
             return result.data
         except Exception as e:
             print(f"❌ Error getting workouts: {e}")
+            print(f"❌ Get workouts error traceback: {traceback.format_exc()}")
             return []
 
 # Initialize workout logger
@@ -226,6 +259,10 @@ def index():
 @app.route('/log', methods=['POST'])
 def log_workout():
     """Handle workout logging"""
+    print("\n" + "="*50)
+    print("🚀 NEW WORKOUT LOG REQUEST")
+    print("="*50)
+    
     if not workout_logger:
         print("❌ Workout logger not available")
         return jsonify({'success': False, 'error': 'System not initialized - check environment variables'})
@@ -233,6 +270,7 @@ def log_workout():
     try:
         user_input = request.json.get('input', '').strip()
         if not user_input:
+            print("❌ No input provided")
             return jsonify({'success': False, 'error': 'No input provided'})
         
         print(f"📥 Received input: '{user_input}'")
@@ -242,6 +280,7 @@ def log_workout():
         is_edit = any(keyword in user_input.lower() for keyword in edit_keywords)
         
         if is_edit:
+            print("🔄 Detected edit command")
             # Handle edit commands
             if 'latest' in user_input.lower() or 'last' in user_input.lower():
                 success = workout_logger.delete_latest_exercise()
@@ -252,17 +291,22 @@ def log_workout():
             else:
                 return jsonify({'success': False, 'error': 'Edit command not recognized'})
         else:
+            print("📝 Processing workout logging")
             # Handle workout logging
             parsed_data = workout_logger.parse_input(user_input)
+            print(f"✅ Parsing completed, now logging...")
             success = workout_logger.log_workout(parsed_data)
             
             if success:
+                print("🎉 WORKOUT LOGGED SUCCESSFULLY!")
                 return jsonify({'success': True, 'message': 'Workout logged successfully!'})
             else:
+                print("❌ WORKOUT LOGGING FAILED!")
                 return jsonify({'success': False, 'error': 'Failed to log workout - check logs for details'})
                 
     except Exception as e:
-        print(f"❌ Exception in log_workout: {e}")
+        print(f"❌ EXCEPTION in log_workout endpoint: {e}")
+        print(f"❌ Exception traceback: {traceback.format_exc()}")
         return jsonify({'success': False, 'error': f'Error: {str(e)}'})
 
 @app.route('/workouts')
