@@ -1,333 +1,248 @@
 import os
+import re
 import json
-import logging
-from datetime import datetime
-from typing import Dict, List, Optional
-
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, jsonify, redirect, url_for
 import google.generativeai as genai
 from supabase import create_client, Client
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from dotenv import load_dotenv
 
-# Configure logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# Load environment variables
+load_dotenv()
 
-class FitnessTracker:
-    def __init__(self):
-        # Initialize Supabase client
+app = Flask(__name__)
+
+# Configuration
+GEMINI_MODEL_NAME = 'gemini-1.5-flash'
+
+# Initialize APIs
+def initialize_apis():
+    """Initialize Gemini and Supabase clients"""
+    try:
+        # Gemini API
+        genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+        gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        
+        # Supabase
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')  # Changed from SUPABASE_ANON_KEY
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        supabase = create_client(supabase_url, supabase_key)
         
-        if not supabase_url or not supabase_key:
-            raise ValueError("SUPABASE_URL and SUPABASE_KEY environment variables are required")
-        
-        self.supabase: Client = create_client(supabase_url, supabase_key)
-        
-        # Initialize Gemini
-        google_api_key = os.getenv('GOOGLE_API_KEY')
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable is required")
-        
-        genai.configure(api_key=google_api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        logger.info("FitnessTracker initialized successfully")
+        return gemini_model, supabase
+    except Exception as e:
+        print(f"Error initializing APIs: {e}")
+        return None, None
 
-    def parse_workout_input(self, user_input: str, current_date: str = None) -> Dict:
-        """Parse natural language workout input using Gemini"""
-        if current_date is None:
-            current_date = datetime.now().strftime('%Y-%m-%d')
+# Global variables
+gemini_model, supabase = initialize_apis()
+
+class WorkoutLogger:
+    """Handle workout parsing and logging"""
+    
+    def __init__(self, gemini_model, supabase_client):
+        self.gemini_model = gemini_model
+        self.supabase = supabase_client
+    
+    def generate_gemini_prompt(self, user_input: str, current_date: str, is_edit: bool = False) -> str:
+        """Generate prompt for Gemini based on input type"""
         
-        prompt = f"""
-        Today's date is {current_date}. Convert the following workout description into structured JSON.
-        Extract the date from the input if specified, otherwise use today's date.
-        Return ONLY the JSON and no additional text.
-        
-        Use consistent exercise names (e.g., "pull-up" not "pullup" or "pull up").
-        
-        Input: "{user_input}"
-        
-        Output format:
-        {{
-          "date": "YYYY-MM-DD",
-          "exercises": [
+        if is_edit:
+            return f"""
+            Today's date is {current_date}.
+            
+            The user wants to edit/modify their workout data. Parse this command and return the action type and details.
+            
+            Input: "{user_input}"
+            
+            Return ONLY JSON in this format:
             {{
-              "name": "Exercise Name",
-              "sets": [
+              "action": "delete|edit|remove",
+              "target": "latest|last|today|yesterday|specific_exercise",
+              "details": {{
+                "exercise_name": "exercise name if specified",
+                "date": "YYYY-MM-DD if date specified",
+                "set_number": "number if specified"
+              }}
+            }}
+            """
+        else:
+            return f"""
+            Today's date is {current_date}.
+            Convert the following workout description into structured JSON.
+            Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
+            Return ONLY the JSON and no additional text.
+            Use consistent exercise names (e.g., "pull-up" not "pullup").
+            
+            Input: "{user_input}"
+            
+            Output format:
+            {{
+              "date": "YYYY-MM-DD",
+              "exercises": [
                 {{
-                  "set_id": 1,
-                  "weight_kg": null,
-                  "reps": null,
-                  "distance_km": null,
-                  "time_seconds": null,
-                  "notes": null
+                  "name": "Exercise Name",
+                  "sets": [
+                    {{
+                      "set_id": 1,
+                      "weight_kg": null,
+                      "reps": null,
+                      "distance_km": null,
+                      "time_seconds": null,
+                      "notes": null
+                    }}
+                  ]
                 }}
               ]
             }}
-          ]
-        }}
-        """
+            """
+    
+    def parse_input(self, user_input: str, current_date: str = None, is_edit: bool = False) -> dict:
+        """Parse user input using Gemini"""
+        if current_date is None:
+            current_date = datetime.now().strftime('%Y-%m-%d')
         
         try:
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
+            prompt = self.generate_gemini_prompt(user_input, current_date, is_edit)
+            response = self.gemini_model.generate_content(prompt)
+            response_text = response.text
             
-            # Clean up response if it has markdown formatting
-            if response_text.startswith('```json'):
-                response_text = response_text[7:]
-            if response_text.endswith('```'):
-                response_text = response_text[:-3]
+            # Extract JSON from response
+            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
+            if json_match:
+                json_string = json_match.group(1).strip()
+            else:
+                json_string = response_text.strip()
             
-            parsed_data = json.loads(response_text.strip())
-            logger.info(f"Successfully parsed workout: {parsed_data}")
-            return parsed_data
-            
+            return json.loads(json_string)
         except Exception as e:
-            logger.error(f"Error parsing workout input: {e}")
+            print(f"Error parsing input: {e}")
             raise
-
-    def log_workout_to_supabase(self, workout_data: Dict, user_id: str, username: str, raw_input: str):
-        """Log parsed workout data to Supabase"""
+    
+    def log_workout(self, workout_data: dict) -> bool:
+        """Log workout data to Supabase"""
         try:
-            workout_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
+            log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
             
             for exercise in workout_data.get("exercises", []):
                 exercise_name = exercise.get("name", "Unknown Exercise")
                 
                 for set_data in exercise.get("sets", []):
-                    # Prepare data for insertion
-                    log_entry = {
-                        "date": workout_date,
+                    # Insert into exercise_logs table
+                    data = {
+                        "user_id": "default_user",  # For now, single user
+                        "date": log_date,
                         "exercise_name": exercise_name,
                         "set_number": set_data.get("set_id", 1),
                         "weight_kg": set_data.get("weight_kg"),
                         "reps": set_data.get("reps"),
                         "distance_km": set_data.get("distance_km"),
                         "time_seconds": set_data.get("time_seconds"),
-                        "notes": set_data.get("notes"),
-                        "user_id": user_id,
-                        "username": username,
-                        "raw_input": raw_input
+                        "notes": set_data.get("notes")
                     }
                     
-                    # Insert into Supabase
-                    result = self.supabase.table('exercise_logs').insert(log_entry).execute()
-                    logger.info(f"Logged exercise: {exercise_name}")
-            
-            logger.info("Workout logged successfully to Supabase")
-            
+                    result = self.supabase.table('exercise_logs').insert(data).execute()
+                    
+            return True
         except Exception as e:
-            logger.error(f"Error logging workout to Supabase: {e}")
-            raise
-
-    def get_recent_workouts(self, user_id: str, limit: int = 5) -> List[Dict]:
-        """Get recent workouts for a user"""
+            print(f"Error logging workout: {e}")
+            return False
+    
+    def delete_latest_exercise(self) -> bool:
+        """Delete the most recent exercise entry"""
         try:
+            # Get the latest entry
             result = self.supabase.table('exercise_logs')\
                 .select('*')\
-                .eq('user_id', user_id)\
-                .order('date', desc=True)\
+                .eq('user_id', 'default_user')\
                 .order('created_at', desc=True)\
-                .limit(limit)\
+                .limit(1)\
+                .execute()
+            
+            if result.data:
+                latest_id = result.data[0]['id']
+                self.supabase.table('exercise_logs').delete().eq('id', latest_id).execute()
+                return True
+            return False
+        except Exception as e:
+            print(f"Error deleting exercise: {e}")
+            return False
+    
+    def get_recent_workouts(self, days: int = 7) -> list:
+        """Get recent workout data"""
+        try:
+            cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+            
+            result = self.supabase.table('exercise_logs')\
+                .select('*')\
+                .eq('user_id', 'default_user')\
+                .gte('date', cutoff_date)\
+                .order('date', desc=True)\
                 .execute()
             
             return result.data
-            
         except Exception as e:
-            logger.error(f"Error fetching recent workouts: {e}")
+            print(f"Error getting workouts: {e}")
             return []
 
-# Initialize the fitness tracker
-fitness_tracker = FitnessTracker()
+# Initialize workout logger
+workout_logger = WorkoutLogger(gemini_model, supabase) if gemini_model and supabase else None
 
-# Telegram Bot Handlers
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
-    user = update.effective_user
-    welcome_message = f"""
-🏋️ Welcome {user.first_name}!
+@app.route('/')
+def index():
+    """Main page with input form and recent workouts"""
+    recent_workouts = []
+    if workout_logger:
+        recent_workouts = workout_logger.get_recent_workouts()
+    
+    return render_template('index.html', recent_workouts=recent_workouts)
 
-I'm your personal fitness tracker bot. Just send me your workout descriptions and I'll log them automatically!
-
-Examples:
-• "5 pull ups, 10 push ups"
-• "ran 3km in 20 minutes"
-• "bench press 80kg 3x8"
-• "yesterday: squats 100kg 5x5"
-
-Use /recent to see your last 5 workouts.
-Use /help for more commands.
-    """
-    await update.message.reply_text(welcome_message)
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command"""
-    help_text = """
-🤖 Available Commands:
-
-/start - Welcome message
-/help - Show this help
-/recent - Show your last 5 workouts
-
-📝 How to log workouts:
-Just type your workout in natural language!
-
-Examples:
-• "5 pull ups, 10 push ups"
-• "ran 5km in 30 minutes"
-• "deadlift 120kg 3 sets 5 reps"
-• "yesterday: bench press 80kg 8,8,6 reps"
-• "bicep curls 15kg 12 reps 3 sets"
-
-I'll automatically parse and save your workout data!
-    """
-    await update.message.reply_text(help_text)
-
-async def recent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /recent command"""
-    user_id = str(update.effective_user.id)
+@app.route('/log', methods=['POST'])
+def log_workout():
+    """Handle workout logging"""
+    if not workout_logger:
+        return jsonify({'success': False, 'error': 'System not initialized'})
     
     try:
-        recent_workouts = fitness_tracker.get_recent_workouts(user_id, limit=5)
+        user_input = request.json.get('input', '').strip()
+        if not user_input:
+            return jsonify({'success': False, 'error': 'No input provided'})
         
-        if not recent_workouts:
-            await update.message.reply_text("No workouts found. Start logging by sending me your workout!")
-            return
+        # Check if this is an edit command
+        edit_keywords = ['delete', 'remove', 'edit', 'undo', 'clear']
+        is_edit = any(keyword in user_input.lower() for keyword in edit_keywords)
         
-        message = "🏋️ Your Recent Workouts:\n\n"
-        
-        current_date = None
-        for workout in recent_workouts:
-            workout_date = workout['date']
-            
-            # Add date header if it's a new date
-            if workout_date != current_date:
-                message += f"📅 {workout_date}\n"
-                current_date = workout_date
-            
-            # Format workout entry
-            exercise = workout['exercise_name']
-            details = []
-            
-            if workout['weight_kg']:
-                details.append(f"{workout['weight_kg']}kg")
-            if workout['reps']:
-                details.append(f"{workout['reps']} reps")
-            if workout['distance_km']:
-                details.append(f"{workout['distance_km']}km")
-            if workout['time_seconds']:
-                minutes = workout['time_seconds'] // 60
-                seconds = workout['time_seconds'] % 60
-                if minutes > 0:
-                    details.append(f"{minutes}m {seconds}s" if seconds > 0 else f"{minutes}m")
+        if is_edit:
+            # Handle edit commands
+            if 'latest' in user_input.lower() or 'last' in user_input.lower():
+                success = workout_logger.delete_latest_exercise()
+                if success:
+                    return jsonify({'success': True, 'message': 'Latest exercise deleted successfully!'})
                 else:
-                    details.append(f"{seconds}s")
+                    return jsonify({'success': False, 'error': 'No exercise found to delete'})
+            else:
+                return jsonify({'success': False, 'error': 'Edit command not recognized'})
+        else:
+            # Handle workout logging
+            parsed_data = workout_logger.parse_input(user_input)
+            success = workout_logger.log_workout(parsed_data)
             
-            detail_str = " • ".join(details) if details else ""
-            message += f"  • {exercise}" + (f" ({detail_str})" if detail_str else "") + "\n"
-        
-        await update.message.reply_text(message)
-        
+            if success:
+                return jsonify({'success': True, 'message': 'Workout logged successfully!'})
+            else:
+                return jsonify({'success': False, 'error': 'Failed to log workout'})
+                
     except Exception as e:
-        logger.error(f"Error in recent_command: {e}")
-        await update.message.reply_text("Sorry, I couldn't fetch your recent workouts. Please try again.")
+        return jsonify({'success': False, 'error': f'Error: {str(e)}'})
 
-async def handle_workout_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle workout input messages"""
-    user = update.effective_user
-    user_id = str(user.id)
-    username = user.first_name or user.username or "Unknown"
-    raw_input = update.message.text
+@app.route('/workouts')
+def get_workouts():
+    """API endpoint to get recent workouts"""
+    if not workout_logger:
+        return jsonify([])
     
-    try:
-        # Show typing indicator
-        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        
-        # Parse the workout
-        parsed_workout = fitness_tracker.parse_workout_input(raw_input)
-        
-        # Log to Supabase
-        fitness_tracker.log_workout_to_supabase(
-            parsed_workout, 
-            user_id, 
-            username, 
-            raw_input
-        )
-        
-        # Send confirmation
-        exercise_count = len(parsed_workout.get("exercises", []))
-        total_sets = sum(len(ex.get("sets", [])) for ex in parsed_workout.get("exercises", []))
-        
-        confirmation = f"✅ Logged {exercise_count} exercise(s) with {total_sets} set(s)!"
-        await update.message.reply_text(confirmation)
-        
-    except Exception as e:
-        logger.error(f"Error handling workout message: {e}")
-        await update.message.reply_text(
-            "Sorry, I had trouble processing that workout. Could you try rephrasing it?"
-        )
-
-def main():
-    """Main function to run the bot"""
-    # Get bot token
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    if not bot_token:
-        raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
-    
-    # Create application
-    application = Application.builder().token(bot_token).build()
-    
-    # Add handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("recent", recent_command))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_workout_message))
-    
-    # Get port from environment (Render provides this)
-    port = int(os.getenv('PORT', 8000))
-    
-    # Check if we have the webhook URL (for production) or run polling (for development)
-    render_url = os.getenv('RENDER_EXTERNAL_URL')
-    
-    if render_url:
-        # Production: Use webhooks
-        logger.info(f"Starting bot with webhooks on port {port}")
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=bot_token,
-            webhook_url=f"https://{render_url}/{bot_token}"
-        )
-    else:
-        # Development: Use polling (but still listen on port for health checks)
-        logger.info(f"Starting bot with polling (development mode) on port {port}")
-        
-        # Start a simple HTTP server for health checks
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-        import threading
-        
-        class HealthHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_response(200)
-                self.send_header('Content-type', 'text/plain')
-                self.end_headers()
-                self.wfile.write(b'Bot is running')
-            
-            def log_message(self, format, *args):
-                pass  # Suppress HTTP logs
-        
-        # Start health check server in a separate thread
-        health_server = HTTPServer(("0.0.0.0", port), HealthHandler)
-        health_thread = threading.Thread(target=health_server.serve_forever)
-        health_thread.daemon = True
-        health_thread.start()
-        
-        # Run bot with polling
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+    workouts = workout_logger.get_recent_workouts()
+    return jsonify(workouts)
 
 if __name__ == '__main__':
-    main()
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
