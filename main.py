@@ -25,7 +25,7 @@ def initialize_apis():
         
         # Supabase
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_ANON_KEY')
+        supabase_key = os.getenv('SUPABASE_KEY')
         supabase = create_client(supabase_url, supabase_key)
         
         return gemini_model, supabase
