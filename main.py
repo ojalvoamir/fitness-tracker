@@ -2,7 +2,7 @@ import os
 import re
 import json
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 import google.generativeai as genai
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -12,206 +12,236 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configuration - FIXED TO USE GEMINI 2.0!
-GEMINI_MODEL_NAME = 'gemini-2.0-flash-exp'  # ✅ CORRECTED MODEL NAME
+# Configuration
+GEMINI_MODEL_NAME = 'gemini-2.0-flash-exp'
 
 # Initialize APIs
 def initialize_apis():
     """Initialize Gemini and Supabase clients"""
     try:
         # Gemini API
-        genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+        api_key = os.getenv('GOOGLE_API_KEY')
+        if not api_key:
+            print("❌ GOOGLE_API_KEY not found!")
+            return None, None
+        
+        genai.configure(api_key=api_key)
         gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+        print("✅ Gemini initialized successfully")
         
         # Supabase
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_key = os.getenv('SUPABASE_ANON_KEY')  # FIXED: Using SUPABASE_ANON_KEY
+        
+        if not supabase_url or not supabase_key:
+            print(f"❌ Supabase credentials missing! URL: {bool(supabase_url)}, KEY: {bool(supabase_key)}")
+            return gemini_model, None
+        
         supabase = create_client(supabase_url, supabase_key)
+        print("✅ Supabase initialized successfully")
         
         return gemini_model, supabase
     except Exception as e:
-        print(f"Error initializing APIs: {e}")
+        print(f"❌ Error initializing APIs: {e}")
         return None, None
 
 # Global variables
 gemini_model, supabase = initialize_apis()
 
 class WorkoutLogger:
-    """Handle workout parsing and logging with trial mode support"""
+    """Handle workout parsing and logging"""
     
     def __init__(self, gemini_model, supabase_client):
         self.gemini_model = gemini_model
         self.supabase = supabase_client
     
     def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
-        """Generate prompt for Gemini 2.0"""
+        """Generate prompt for Gemini"""
         return f"""
-Today's date is {current_date}.
-Convert the following workout description into structured JSON.
-Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
-Return ONLY the JSON and no additional text.
-Use consistent exercise names (e.g., "pull-up" not "pullup").
-
-Input: "{user_input}"
-
-Output format:
-{{
-  "date": "YYYY-MM-DD",
-  "user_id": "{user_id}",
-  "username": "User",
-  "raw_input": "{user_input}",
-  "exercises": [
-    {{
-      "name": "Exercise Name",
-      "sets": [
+        Today's date is {current_date}.
+        Convert the following workout description into structured JSON.
+        Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
+        Return ONLY the JSON and no additional text.
+        Use consistent exercise names (e.g., "pull-up" not "pullup").
+        
+        Input: "{user_input}"
+        
+        Output format:
         {{
-          "set_number": 1,
-          "weight_kg": null,
-          "reps": null,
-          "distance_km": null,
-          "time_seconds": null,
-          "notes": null
+            "date": "YYYY-MM-DD",
+            "user_id": "{user_id}",
+            "username": "User",
+            "raw_input": "{user_input}",
+            "exercises": [
+                {{
+                    "name": "Exercise Name",
+                    "sets": [
+                        {{
+                            "set_id": 1,
+                            "kg": null,
+                            "reps": null,
+                            "distance_km": null,
+                            "time_sec": null,
+                            "size_cm": null
+                        }}
+                    ]
+                }}
+            ]
         }}
-      ]
-    }}
-  ]
-}}
-"""
-
-    def parse_input_with_gemini(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
-        """Parse user input using Gemini 2.0"""
-        if current_date is None:
-            current_date = datetime.today().strftime('%Y-%m-%d')
-
+        """
+    
+    def parse_input(self, user_input: str, user_id: str = "default_user") -> dict:
+        """Parse user input using Gemini"""
         try:
-            response = self.gemini_model.generate_content(
-                self.generate_gemini_prompt(user_input, current_date, user_id)
-            )
+            current_date = datetime.today().strftime('%Y-%m-%d')
+            prompt = self.generate_gemini_prompt(user_input, current_date, user_id)
+            
+            response = self.gemini_model.generate_content(prompt)
             response_text = response.text
-
+            
             # Extract JSON from response
             json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
             else:
                 json_string = response_text.strip()
-
-            parsed_data = json.loads(json_string)
-            return parsed_data
+            
+            return json.loads(json_string)
         except Exception as e:
-            print(f"Error parsing with Gemini: {e}")
-            raise
-
-    def log_workout_to_supabase(self, workout_data: dict, trial_mode: bool = False):
-        """Log workout to Supabase (or simulate if trial_mode=True)"""
-        if trial_mode:
-            # Trial mode: just return success without saving
-            return {
-                "success": True,
-                "message": "🧪 Trial mode: Workout parsed successfully but not saved to database",
-                "parsed_data": workout_data
-            }
-        
+            print(f"Error parsing input: {e}")
+            return None
+    
+    def log_workout(self, workout_data: dict) -> bool:
+        """Log workout to Supabase"""
         try:
-            # Real mode: save to database
-            log_date = workout_data.get("date", datetime.today().strftime('%Y-%m-%d'))
-            user_id = workout_data.get("user_id", "default_user")
-            username = workout_data.get("username", "User")
-            raw_input = workout_data.get("raw_input", "")
-
-            for exercise in workout_data.get("exercises", []):
-                exercise_name = exercise.get("name", "Unknown Exercise")
+            if not workout_data or not self.supabase:
+                return False
+            
+            # Insert workout record
+            workout_result = self.supabase.table('workouts').insert({
+                'date': workout_data['date'],
+                'user_id': workout_data.get('user_id', 'default_user'),
+                'username': workout_data.get('username', 'User'),
+                'raw_input': workout_data.get('raw_input', '')
+            }).execute()
+            
+            if not workout_result.data:
+                return False
+            
+            workout_id = workout_result.data[0]['id']
+            
+            # Insert exercises
+            for exercise in workout_data.get('exercises', []):
+                exercise_result = self.supabase.table('exercises').insert({
+                    'workout_id': workout_id,
+                    'name': exercise['name']
+                }).execute()
                 
-                for set_data in exercise.get("sets", []):
-                    # Insert into workouts table
-                    workout_entry = {
-                        "date": log_date,
-                        "user_id": user_id,
-                        "username": username,
-                        "exercise_name": exercise_name,
-                        "set_number": set_data.get("set_number", 1),
-                        "weight_kg": set_data.get("weight_kg"),
-                        "reps": set_data.get("reps"),
-                        "distance_km": set_data.get("distance_km"),
-                        "time_seconds": set_data.get("time_seconds"),
-                        "notes": set_data.get("notes"),
-                        "raw_input": raw_input
-                    }
+                if exercise_result.data:
+                    exercise_id = exercise_result.data[0]['id']
                     
-                    result = self.supabase.table("workouts").insert(workout_entry).execute()
-
-            return {
-                "success": True,
-                "message": "💪 Workout logged successfully!",
-                "parsed_data": workout_data
-            }
+                    # Insert sets
+                    for set_data in exercise.get('sets', []):
+                        self.supabase.table('exercise_metrics').insert({
+                            'exercise_id': exercise_id,
+                            'set_id': set_data.get('set_id', 1),
+                            'kg': set_data.get('kg'),
+                            'reps': set_data.get('reps'),
+                            'distance_km': set_data.get('distance_km'),
+                            'time_sec': set_data.get('time_sec'),
+                            'size_cm': set_data.get('size_cm')
+                        }).execute()
+            
+            return True
         except Exception as e:
-            print(f"Error logging to Supabase: {e}")
-            return {
-                "success": False,
-                "error": f"Database error: {str(e)}"
-            }
+            print(f"Error logging workout: {e}")
+            return False
+    
+    def get_recent_workouts(self, limit: int = 10) -> list:
+        """Get recent workouts"""
+        try:
+            if not self.supabase:
+                return []
+            
+            result = self.supabase.table('workouts').select('*').order('date', desc=True).limit(limit).execute()
+            return result.data if result.data else []
+        except Exception as e:
+            print(f"Error getting workouts: {e}")
+            return []
 
-# Initialize logger
-workout_logger = WorkoutLogger(gemini_model, supabase)
+# Initialize workout logger
+workout_logger = WorkoutLogger(gemini_model, supabase) if gemini_model and supabase else None
 
 @app.route('/')
 def index():
-    """Main page with recent workouts"""
-    try:
-        # Get recent workouts
-        result = supabase.table("workouts").select("*").order("date", desc=True).limit(10).execute()
-        recent_workouts = result.data if result.data else []
-        
-        return render_template('index.html', recent_workouts=recent_workouts)
-    except Exception as e:
-        print(f"Error loading recent workouts: {e}")
-        return render_template('index.html', recent_workouts=[])
+    """Main page"""
+    return render_template('index.html')
 
 @app.route('/log', methods=['POST'])
 def log_workout():
-    """Handle workout logging with trial mode support"""
+    """API endpoint to log workouts"""
     try:
+        if not workout_logger:
+            return jsonify({'success': False, 'error': 'System not initialized'})
+        
         data = request.get_json()
         user_input = data.get('input', '').strip()
-        trial_mode = data.get('trial_mode', False)  # New: trial mode flag
         
         if not user_input:
-            return jsonify({"success": False, "error": "Please enter a workout description"})
-
-        # Parse with Gemini
-        parsed_workout = workout_logger.parse_input_with_gemini(user_input)
+            return jsonify({'success': False, 'error': 'No input provided'})
         
-        # Log to database (or simulate if trial mode)
-        result = workout_logger.log_workout_to_supabase(parsed_workout, trial_mode=trial_mode)
+        # Parse and log workout
+        parsed_data = workout_logger.parse_input(user_input)
         
-        return jsonify(result)
+        if not parsed_data:
+            return jsonify({'success': False, 'error': 'Failed to parse input'})
         
+        success = workout_logger.log_workout(parsed_data)
+        
+        if success:
+            return jsonify({'success': True, 'message': 'Workout logged successfully!'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to log workout'})
+    
     except Exception as e:
-        print(f"Error in log_workout: {e}")
-        return jsonify({"success": False, "error": f"An error occurred: {str(e)}"})
+        return jsonify({'success': False, 'error': f'Error: {str(e)}'})
 
-@app.route('/delete_latest', methods=['POST'])
-def delete_latest():
-    """Delete the most recent workout entry"""
-    try:
-        # Get the most recent workout
-        result = supabase.table("workouts").select("*").order("created_at", desc=True).limit(1).execute()
-        
-        if not result.data:
-            return jsonify({"success": False, "error": "No workouts found to delete"})
-        
-        latest_workout = result.data[0]
-        workout_id = latest_workout['id']
-        
-        # Delete the workout
-        supabase.table("workouts").delete().eq("id", workout_id).execute()
-        
-        return jsonify({"success": True, "message": "Latest workout deleted successfully"})
-        
-    except Exception as e:
-        print(f"Error deleting workout: {e}")
-        return jsonify({"success": False, "error": f"Error deleting workout: {str(e)}"})
+@app.route('/workouts')
+def get_workouts():
+    """API endpoint to get recent workouts"""
+    if not workout_logger:
+        return jsonify([])
+    
+    workouts = workout_logger.get_recent_workouts()
+    return jsonify(workouts)
 
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+
+# CRITICAL: EXPLICIT PORT BINDING FOR RENDER
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Get port from environment variable (Render sets this automatically)
+    port = int(os.environ.get('PORT', 5000))
+    
+    # Print debug info
+    print(f"🚀 Starting Flask app...")
+    print(f"📍 Host: 0.0.0.0")
+    print(f"🔌 Port: {port}")
+    print(f"🔑 Environment variables loaded:")
+    print(f"   - GOOGLE_API_KEY: {'✅' if os.getenv('GOOGLE_API_KEY') else '❌'}")
+    print(f"   - SUPABASE_URL: {'✅' if os.getenv('SUPABASE_URL') else '❌'}")
+    print(f"   - SUPABASE_ANON_KEY: {'✅' if os.getenv('SUPABASE_ANON_KEY') else '❌'}")
+    
+    # FORCE EXPLICIT BINDING - NO AMBIGUITY
+    try:
+        app.run(
+            host='0.0.0.0',    # MUST be 0.0.0.0 for external access
+            port=port,         # Use Render's PORT environment variable
+            debug=False,       # No debug in production
+            threaded=True      # Enable threading for better performance
+        )
+    except Exception as e:
+        print(f"❌ Failed to start Flask app: {e}")
+        raise
