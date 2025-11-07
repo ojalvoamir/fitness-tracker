@@ -39,7 +39,7 @@ class WorkoutLogger:
         self.gemini_model = gemini_model
         self.supabase = supabase_client
     
-    def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -&gt; str:
+    def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
         """Generate prompt for Gemini based on your actual schema"""
         return f"""
         Today's date is {current_date}.
@@ -81,7 +81,7 @@ class WorkoutLogger:
         }}
         """
     
-    def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user", trial_mode: bool = False) -&gt; dict:
+    def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user", trial_mode: bool = False) -> dict:
         """Parse user input using Gemini"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
@@ -107,14 +107,11 @@ class WorkoutLogger:
             print(f"Error parsing input: {e}")
             raise
     
-    def get_or_create_exercise_type(self, exercise_name: str) -&gt; int:
+    def get_or_create_exercise_type(self, exercise_name: str) -> int:
         """Get existing exercise type ID or create new one"""
         try:
             # Check if exercise exists in activity_names table
-            result = self.supabase.table('activity_names')\
-                .select('id')\
-                .eq('canonical_name', exercise_name)\
-                .execute()
+            result = self.supabase.table('activity_names').select('id').eq('canonical_name', exercise_name).execute()
             
             if result.data:
                 return result.data[0]['id']
@@ -131,7 +128,7 @@ class WorkoutLogger:
             print(f"Error with exercise type: {e}")
             raise
     
-    def log_workout(self, workout_data: dict, trial_mode: bool = False) -&gt; bool:
+    def log_workout(self, workout_data: dict, trial_mode: bool = False) -> bool:
         """Log workout data to YOUR ACTUAL Supabase schema"""
         try:
             log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
@@ -151,16 +148,14 @@ class WorkoutLogger:
                     set_number = set_data.get("set_number", 1)
                     
                     # Create activity log entry (using correct table name)
-                    log_result = self.supabase.table('activity_logs')\
-                        .insert({
-                            'date': log_date,
-                            'exercise_type_id': exercise_type_id,
-                            'set_number': set_number,
-                            'user_id': user_id,
-                            'username': username,
-                            'raw_input': raw_input
-                        })\
-                        .execute()
+                    log_result = self.supabase.table('activity_logs').insert({
+                        'date': log_date,
+                        'exercise_type_id': exercise_type_id,
+                        'set_number': set_number,
+                        'user_id': user_id,
+                        'username': username,
+                        'raw_input': raw_input
+                    }).execute()
                     
                     exercise_log_id = log_result.data[0]['id']
                     
@@ -168,30 +163,23 @@ class WorkoutLogger:
                     metrics = set_data.get("metrics", [])
                     for metric in metrics:
                         if metric.get("value") is not None:  # Only log non-null values
-                            self.supabase.table('activity_metrics')\
-                                .insert({
-                                    'exercise_log_id': exercise_log_id,
-                                    'metric_type': metric.get("type"),
-                                    'value': metric.get("value"),
-                                    'unit': metric.get("unit")
-                                })\
-                                .execute()
+                            self.supabase.table('activity_metrics').insert({
+                                'exercise_log_id': exercise_log_id,
+                                'metric_type': metric.get("type"),
+                                'value': metric.get("value"),
+                                'unit': metric.get("unit")
+                            }).execute()
             
             return True
         except Exception as e:
             print(f"Error logging workout: {e}")
             return False
     
-    def delete_latest_exercise(self, user_id: str = "default_user") -&gt; bool:
+    def delete_latest_exercise(self, user_id: str = "default_user") -> bool:
         """Delete the most recent exercise entry for this user"""
         try:
             # Get the latest exercise log for this user
-            result = self.supabase.table('activity_logs')\
-                .select('id')\
-                .eq('user_id', user_id)\
-                .order('created_at', desc=True)\
-                .limit(1)\
-                .execute()
+            result = self.supabase.table('activity_logs').select('id').eq('user_id', user_id).order('created_at', desc=True).limit(1).execute()
             
             if result.data:
                 exercise_log_id = result.data[0]['id']
@@ -205,16 +193,13 @@ class WorkoutLogger:
             print(f"Error deleting exercise: {e}")
             return False
     
-    def get_recent_workouts(self, days: int = 7, user_id: str = None) -&gt; list:
+    def get_recent_workouts(self, days: int = 7, user_id: str = None) -> list:
         """Get recent workout data with proper joins - can filter by user or show all"""
         try:
             cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             
             # Build query
-            query = self.supabase.table('activity_logs')\
-                .select('*, activity_names(canonical_name)')\
-                .gte('date', cutoff_date)\
-                .order('date', desc=True)
+            query = self.supabase.table('activity_logs').select('*, activity_names(canonical_name)').gte('date', cutoff_date).order('date', desc=True)
             
             # Filter by user if specified
             if user_id:
@@ -226,27 +211,18 @@ class WorkoutLogger:
             print(f"Error getting workouts: {e}")
             return []
     
-    def clear_trial_data(self) -&gt; bool:
+    def clear_trial_data(self) -> bool:
         """Clear all trial data from the database"""
         try:
             # Get all trial exercise logs
-            trial_logs = self.supabase.table('activity_logs')\
-                .select('id')\
-                .eq('user_id', 'trial_user')\
-                .execute()
+            trial_logs = self.supabase.table('activity_logs').select('id').eq('user_id', 'trial_user').execute()
             
             # Delete metrics for trial logs
             for log in trial_logs.data:
-                self.supabase.table('activity_metrics')\
-                    .delete()\
-                    .eq('exercise_log_id', log['id'])\
-                    .execute()
+                self.supabase.table('activity_metrics').delete().eq('exercise_log_id', log['id']).execute()
             
             # Delete trial logs
-            self.supabase.table('activity_logs')\
-                .delete()\
-                .eq('user_id', 'trial_user')\
-                .execute()
+            self.supabase.table('activity_logs').delete().eq('user_id', 'trial_user').execute()
             
             return True
         except Exception as e:
