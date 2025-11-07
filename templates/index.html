@@ -44,6 +44,69 @@
             font-size: 1.1rem;
         }
         
+        /* Toggle Switch Styles */
+        .mode-selector {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            margin: 20px 30px;
+            border-radius: 15px;
+            text-align: center;
+        }
+        
+        .mode-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .mode-label {
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0.8;
+            min-width: 80px;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            width: 60px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .toggle-switch.active {
+            background: rgba(255, 255, 255, 0.5);
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 24px;
+            height: 24px;
+            background: white;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .toggle-switch.active .toggle-slider {
+            transform: translateX(30px);
+        }
+        
+        .mode-description {
+            font-size: 12px;
+            opacity: 0.7;
+            margin-top: 8px;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
         .input-section {
             padding: 40px;
         }
@@ -212,6 +275,16 @@
             .input-section, .recent-workouts {
                 padding: 20px;
             }
+            
+            .mode-selector {
+                margin: 15px 20px;
+                padding: 15px;
+            }
+            
+            .mode-toggle {
+                flex-direction: column;
+                gap: 10px;
+            }
         }
     </style>
 </head>
@@ -220,6 +293,20 @@
         <div class="header">
             <h1>💪 Workout Logger</h1>
             <p>Log your workouts with natural language</p>
+            
+            <!-- Mode Selector Toggle -->
+            <div class="mode-selector">
+                <div class="mode-toggle">
+                    <span class="mode-label">🎯 Track Mode</span>
+                    <div class="toggle-switch" id="modeToggle">
+                        <div class="toggle-slider"></div>
+                    </div>
+                    <span class="mode-label">🧪 Trial Mode</span>
+                </div>
+                <div class="mode-description" id="modeDescription">
+                    Save workouts permanently to your database
+                </div>
+            </div>
         </div>
         
         <div class="input-section">
@@ -263,16 +350,16 @@
             <div id="workoutsList">
                 {% if recent_workouts %}
                     {% for workout in recent_workouts[:10] %}
-                    <div class="workout-item">
-                        <div class="workout-date">{{ workout.date }}</div>
-                        <div class="workout-details">
-                            {{ workout.exercise_name }}
-                            {% if workout.weight_kg %} - {{ workout.weight_kg }}kg{% endif %}
-                            {% if workout.reps %} - {{ workout.reps }} reps{% endif %}
-                            {% if workout.distance_km %} - {{ workout.distance_km }}km{% endif %}
-                            {% if workout.time_seconds %} - {{ (workout.time_seconds/60)|round(1) }} min{% endif %}
+                        <div class="workout-item">
+                            <div class="workout-date">{{ workout.date }}</div>
+                            <div class="workout-details">
+                                {{ workout.exercise_name }}
+                                {% if workout.weight_kg %} - {{ workout.weight_kg }}kg{% endif %}
+                                {% if workout.reps %} - {{ workout.reps }} reps{% endif %}
+                                {% if workout.distance_km %} - {{ workout.distance_km }}km{% endif %}
+                                {% if workout.time_seconds %} - {{ (workout.time_seconds/60)|round(1) }} min{% endif %}
+                            </div>
                         </div>
-                    </div>
                     {% endfor %}
                 {% else %}
                     <p style="color: #666; text-align: center; padding: 20px;">
@@ -284,6 +371,23 @@
     </div>
 
     <script>
+        // Mode toggle functionality
+        let isTrialMode = false;
+        const modeToggle = document.getElementById('modeToggle');
+        const modeDescription = document.getElementById('modeDescription');
+        
+        modeToggle.addEventListener('click', function() {
+            isTrialMode = !isTrialMode;
+            this.classList.toggle('active');
+            
+            if (isTrialMode) {
+                modeDescription.textContent = 'Test the system without saving to your database';
+            } else {
+                modeDescription.textContent = 'Save workouts permanently to your database';
+            }
+        });
+        
+        // Form submission
         document.getElementById('workoutForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -308,7 +412,10 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ input: input })
+                    body: JSON.stringify({ 
+                        input: input,
+                        trial_mode: isTrialMode
+                    })
                 });
                 
                 const result = await response.json();
@@ -317,10 +424,12 @@
                     showMessage(result.message, 'success');
                     document.getElementById('workoutInput').value = '';
                     
-                    // Refresh the page to show updated workouts
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1500);
+                    // Only refresh if not in trial mode
+                    if (!isTrialMode) {
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1500);
+                    }
                 } else {
                     showMessage(result.error, 'error');
                 }
