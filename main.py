@@ -39,7 +39,7 @@ class WorkoutLogger:
         self.gemini_model = gemini_model
         self.supabase = supabase_client
     
-    def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
+    def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -&gt; str:
         """Generate prompt for Gemini based on your actual schema"""
         return f"""
         Today's date is {current_date}.
@@ -81,10 +81,14 @@ class WorkoutLogger:
         }}
         """
     
-    def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
+    def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user", trial_mode: bool = False) -&gt; dict:
         """Parse user input using Gemini"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # Set user_id based on mode
+        if trial_mode:
+            user_id = "trial_user"
         
         try:
             prompt = self.generate_gemini_prompt(user_input, current_date, user_id)
@@ -103,7 +107,7 @@ class WorkoutLogger:
             print(f"Error parsing input: {e}")
             raise
     
-    def get_or_create_exercise_type(self, exercise_name: str) -> int:
+    def get_or_create_exercise_type(self, exercise_name: str) -&gt; int:
         """Get existing exercise type ID or create new one"""
         try:
             # Check if exercise exists in activity_names table
@@ -127,12 +131,12 @@ class WorkoutLogger:
             print(f"Error with exercise type: {e}")
             raise
     
-    def log_workout(self, workout_data: dict) -> bool:
+    def log_workout(self, workout_data: dict, trial_mode: bool = False) -&gt; bool:
         """Log workout data to YOUR ACTUAL Supabase schema"""
         try:
             log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
-            user_id = workout_data.get("user_id", "default_user")
-            username = workout_data.get("username", "User")
+            user_id = workout_data.get("user_id", "trial_user" if trial_mode else "default_user")
+            username = workout_data.get("username", "Trial User" if trial_mode else "User")
             raw_input = workout_data.get("raw_input", "")
             
             # Process each exercise
@@ -178,7 +182,7 @@ class WorkoutLogger:
             print(f"Error logging workout: {e}")
             return False
     
-    def delete_latest_exercise(self, user_id: str = "default_user") -> bool:
+    def delete_latest_exercise(self, user_id: str = "default_user") -&gt; bool:
         """Delete the most recent exercise entry for this user"""
         try:
             # Get the latest exercise log for this user
@@ -201,23 +205,53 @@ class WorkoutLogger:
             print(f"Error deleting exercise: {e}")
             return False
     
-    def get_recent_workouts(self, days: int = 7, user_id: str = "default_user") -> list:
-        """Get recent workout data with proper joins"""
+    def get_recent_workouts(self, days: int = 7, user_id: str = None) -&gt; list:
+        """Get recent workout data with proper joins - can filter by user or show all"""
         try:
             cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             
-            # Get logs with exercise names and metrics
-            result = self.supabase.table('activity_logs')\
+            # Build query
+            query = self.supabase.table('activity_logs')\
                 .select('*, activity_names(canonical_name)')\
-                .eq('user_id', user_id)\
                 .gte('date', cutoff_date)\
-                .order('date', desc=True)\
-                .execute()
+                .order('date', desc=True)
             
+            # Filter by user if specified
+            if user_id:
+                query = query.eq('user_id', user_id)
+            
+            result = query.execute()
             return result.data
         except Exception as e:
             print(f"Error getting workouts: {e}")
             return []
+    
+    def clear_trial_data(self) -&gt; bool:
+        """Clear all trial data from the database"""
+        try:
+            # Get all trial exercise logs
+            trial_logs = self.supabase.table('activity_logs')\
+                .select('id')\
+                .eq('user_id', 'trial_user')\
+                .execute()
+            
+            # Delete metrics for trial logs
+            for log in trial_logs.data:
+                self.supabase.table('activity_metrics')\
+                    .delete()\
+                    .eq('exercise_log_id', log['id'])\
+                    .execute()
+            
+            # Delete trial logs
+            self.supabase.table('activity_logs')\
+                .delete()\
+                .eq('user_id', 'trial_user')\
+                .execute()
+            
+            return True
+        except Exception as e:
+            print(f"Error clearing trial data: {e}")
+            return False
 
 # Initialize workout logger
 workout_logger = WorkoutLogger(gemini_model, supabase) if gemini_model and supabase else None
@@ -227,18 +261,21 @@ def index():
     """Main page with input form and recent workouts"""
     recent_workouts = []
     if workout_logger:
+        # Show both regular and trial workouts, but mark them differently
         recent_workouts = workout_logger.get_recent_workouts()
     
     return render_template('index.html', recent_workouts=recent_workouts)
 
 @app.route('/log', methods=['POST'])
 def log_workout():
-    """Handle workout logging"""
+    """Handle workout logging with trial mode support"""
     if not workout_logger:
         return jsonify({'success': False, 'error': 'System not initialized'})
     
     try:
         user_input = request.json.get('input', '').strip()
+        trial_mode = request.json.get('trial_mode', False)
+        
         if not user_input:
             return jsonify({'success': False, 'error': 'No input provided'})
         
@@ -249,20 +286,31 @@ def log_workout():
         if is_edit:
             # Handle edit commands
             if 'latest' in user_input.lower() or 'last' in user_input.lower():
-                success = workout_logger.delete_latest_exercise()
+                user_id = "trial_user" if trial_mode else "default_user"
+                success = workout_logger.delete_latest_exercise(user_id)
                 if success:
-                    return jsonify({'success': True, 'message': 'Latest exercise deleted successfully!'})
+                    mode_text = "trial" if trial_mode else "regular"
+                    return jsonify({'success': True, 'message': f'Latest {mode_text} exercise deleted successfully!'})
                 else:
                     return jsonify({'success': False, 'error': 'No exercise found to delete'})
+            elif 'clear trial' in user_input.lower() or 'clear all trial' in user_input.lower():
+                success = workout_logger.clear_trial_data()
+                if success:
+                    return jsonify({'success': True, 'message': 'All trial data cleared successfully!'})
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to clear trial data'})
             else:
                 return jsonify({'success': False, 'error': 'Edit command not recognized'})
         else:
             # Handle workout logging
-            parsed_data = workout_logger.parse_input(user_input)
-            success = workout_logger.log_workout(parsed_data)
+            parsed_data = workout_logger.parse_input(user_input, trial_mode=trial_mode)
+            success = workout_logger.log_workout(parsed_data, trial_mode=trial_mode)
             
             if success:
-                return jsonify({'success': True, 'message': 'Workout logged successfully!'})
+                if trial_mode:
+                    return jsonify({'success': True, 'message': '🧪 Trial workout logged! (This won\'t affect your permanent records)'})
+                else:
+                    return jsonify({'success': True, 'message': '💪 Workout logged successfully to your fitness history!'})
             else:
                 return jsonify({'success': False, 'error': 'Failed to log workout'})
                 
@@ -277,6 +325,21 @@ def get_workouts():
     
     workouts = workout_logger.get_recent_workouts()
     return jsonify(workouts)
+
+@app.route('/clear-trials', methods=['POST'])
+def clear_trials():
+    """API endpoint to clear all trial data"""
+    if not workout_logger:
+        return jsonify({'success': False, 'error': 'System not initialized'})
+    
+    try:
+        success = workout_logger.clear_trial_data()
+        if success:
+            return jsonify({'success': True, 'message': 'All trial data cleared successfully!'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to clear trial data'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Error: {str(e)}'})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
