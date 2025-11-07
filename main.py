@@ -2,18 +2,14 @@ import os
 import re
 import json
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask import Flask, render_template, request, jsonify
 import google.generativeai as genai
 from supabase import create_client, Client
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 app = Flask(__name__)
 
-# Configuration - UPDATED TO GEMINI 2.0 FLASH!
-GEMINI_MODEL_NAME = 'gemini-2.0-flash-exp'
+# Configuration
+GEMINI_MODEL_NAME = 'gemini-1.5-flash'
 
 # Initialize APIs
 def initialize_apis():
@@ -23,9 +19,9 @@ def initialize_apis():
         genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
         gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
         
-        # Supabase
+        # Supabase - Using your Render environment variables
         supabase_url = os.getenv('SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_KEY')
+        supabase_key = os.getenv('SUPABASE_KEY')  # Your Render env var name
         supabase = create_client(supabase_url, supabase_key)
         
         return gemini_model, supabase
@@ -44,7 +40,7 @@ class WorkoutLogger:
         self.supabase = supabase_client
     
     def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
-        """Generate prompt for Gemini 2.0 based on your actual schema"""
+        """Generate prompt for Gemini based on your actual schema"""
         return f"""
         Today's date is {current_date}.
         Convert the following workout description into structured JSON.
@@ -70,10 +66,10 @@ class WorkoutLogger:
                     {{
                       "type": "reps",
                       "value": 10,
-                      "unit": "reps"
+                      "unit": "count"
                     }},
                     {{
-                      "type": "weight_kg", 
+                      "type": "weight", 
                       "value": 20.5,
                       "unit": "kg"
                     }}
@@ -86,7 +82,7 @@ class WorkoutLogger:
         """
     
     def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
-        """Parse user input using Gemini 2.0"""
+        """Parse user input using Gemini"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
         
@@ -110,23 +106,25 @@ class WorkoutLogger:
     def get_or_create_exercise_type(self, exercise_name: str) -> int:
         """Get existing exercise type ID or create new one"""
         try:
-            # First, try to find existing exercise type
-            result = self.supabase.table('exercise_types')\
+            # Check if exercise exists in activity_names table
+            result = self.supabase.table('activity_names')\
                 .select('id')\
                 .eq('canonical_name', exercise_name)\
                 .execute()
             
             if result.data:
                 return result.data[0]['id']
-            
-            # If not found, create new exercise type
-            result = self.supabase.table('exercise_types')\
-                .insert({'canonical_name': exercise_name})\
-                .execute()
-            
-            return result.data[0]['id']
+            else:
+                # Create new exercise type
+                new_exercise = {
+                    'canonical_name': exercise_name,
+                    'category': 'strength',  # Default category
+                    'activity_type': 'Exercise'
+                }
+                result = self.supabase.table('activity_names').insert(new_exercise).execute()
+                return result.data[0]['id']
         except Exception as e:
-            print(f"Error getting/creating exercise type: {e}")
+            print(f"Error with exercise type: {e}")
             raise
     
     def log_workout(self, workout_data: dict) -> bool:
@@ -148,8 +146,8 @@ class WorkoutLogger:
                 for set_data in exercise.get("sets", []):
                     set_number = set_data.get("set_number", 1)
                     
-                    # Create exercise log entry (NO workout_id needed!)
-                    log_result = self.supabase.table('exercise_logs')\
+                    # Create activity log entry (using correct table name)
+                    log_result = self.supabase.table('activity_logs')\
                         .insert({
                             'date': log_date,
                             'exercise_type_id': exercise_type_id,
@@ -166,7 +164,7 @@ class WorkoutLogger:
                     metrics = set_data.get("metrics", [])
                     for metric in metrics:
                         if metric.get("value") is not None:  # Only log non-null values
-                            self.supabase.table('exercise_metrics')\
+                            self.supabase.table('activity_metrics')\
                                 .insert({
                                     'exercise_log_id': exercise_log_id,
                                     'metric_type': metric.get("type"),
@@ -184,7 +182,7 @@ class WorkoutLogger:
         """Delete the most recent exercise entry for this user"""
         try:
             # Get the latest exercise log for this user
-            result = self.supabase.table('exercise_logs')\
+            result = self.supabase.table('activity_logs')\
                 .select('id')\
                 .eq('user_id', user_id)\
                 .order('created_at', desc=True)\
@@ -193,8 +191,10 @@ class WorkoutLogger:
             
             if result.data:
                 exercise_log_id = result.data[0]['id']
-                # Delete exercise log (cascade should handle exercise_metrics)
-                self.supabase.table('exercise_logs').delete().eq('id', exercise_log_id).execute()
+                # Delete metrics first
+                self.supabase.table('activity_metrics').delete().eq('exercise_log_id', exercise_log_id).execute()
+                # Delete exercise log
+                self.supabase.table('activity_logs').delete().eq('id', exercise_log_id).execute()
                 return True
             return False
         except Exception as e:
@@ -206,35 +206,18 @@ class WorkoutLogger:
         try:
             cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             
-            # Query exercise_logs with joins to exercise_types and exercise_metrics
-            result = self.supabase.rpc('get_workout_summary', {
-                'user_id_param': user_id,
-                'days_back': days
-            }).execute()
-            
-            # If RPC doesn't exist, fall back to basic query
-            if not result.data:
-                result = self.supabase.table('exercise_logs')\
-                    .select('*, exercise_types(canonical_name), exercise_metrics(*)')\
-                    .eq('user_id', user_id)\
-                    .gte('date', cutoff_date)\
-                    .order('date', desc=True)\
-                    .execute()
+            # Get logs with exercise names and metrics
+            result = self.supabase.table('activity_logs')\
+                .select('*, activity_names(canonical_name)')\
+                .eq('user_id', user_id)\
+                .gte('date', cutoff_date)\
+                .order('date', desc=True)\
+                .execute()
             
             return result.data
         except Exception as e:
             print(f"Error getting workouts: {e}")
-            # Fallback to simple query
-            try:
-                result = self.supabase.table('exercise_logs')\
-                    .select('*')\
-                    .eq('user_id', user_id)\
-                    .order('created_at', desc=True)\
-                    .limit(20)\
-                    .execute()
-                return result.data
-            except:
-                return []
+            return []
 
 # Initialize workout logger
 workout_logger = WorkoutLogger(gemini_model, supabase) if gemini_model and supabase else None
