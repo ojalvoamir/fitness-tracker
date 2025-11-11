@@ -24,7 +24,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configuration
-GEMINI_MODEL_NAME = 'gemini-1.5-pro'
+GEMINI_MODEL_NAME = 'gemini-2.0-flash'
 
 def initialize_apis():
     """Initialize Gemini and Supabase clients"""
