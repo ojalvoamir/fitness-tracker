@@ -1,318 +1,178 @@
-&lt;!DOCTYPE html&gt;
-&lt;html lang="en"&gt;
-&lt;head&gt;
-    &lt;meta charset="UTF-8"&gt;
-    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0"&gt;
-    &lt;title&gt;Workout Logger&lt;/title&gt;
-    &lt;style&gt;
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workout Logger</title>
+    <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: #f7f7f8;
-            color: #374151;
-            line-height: 1.6;
-        }
-        
-        .container {
-            max-width: 768px;
+            font-family: Arial, sans-serif;
+            max-width: 800px;
             margin: 0 auto;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
+            padding: 20px;
+            background-color: #f5f5f5;
         }
-        
-        .header {
+        .container {
             background: white;
-            border-bottom: 1px solid #e5e7eb;
-            padding: 1.5rem;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
             text-align: center;
+            margin-bottom: 30px;
         }
-        
-        .header h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #111827;
-        }
-        
-        .main-content {
-            flex: 1;
-            padding: 1.5rem;
-        }
-        
         .input-section {
-            background: white;
-            border-radius: 0.75rem;
-            border: 1px solid #e5e7eb;
-            margin-bottom: 1.5rem;
-            overflow: hidden;
+            margin-bottom: 30px;
         }
-        
-        .examples {
-            padding: 1rem 1.5rem;
-            background: #f9fafb;
-            border-bottom: 1px solid #e5e7eb;
-        }
-        
-        .examples h3 {
-            font-size: 0.875rem;
-            font-weight: 500;
-            color: #6b7280;
-            margin-bottom: 0.5rem;
-        }
-        
-        .examples ul {
-            list-style: none;
-            font-size: 0.875rem;
-            color: #6b7280;
-        }
-        
-        .examples li {
-            margin-bottom: 0.25rem;
-        }
-        
-        .examples li:before {
-            content: "•";
-            margin-right: 0.5rem;
-            color: #9ca3af;
-        }
-        
-        .input-form {
-            padding: 1.5rem;
-        }
-        
-        .input-wrapper {
-            position: relative;
-            margin-bottom: 1rem;
-        }
-        
         textarea {
             width: 100%;
-            min-height: 120px;
-            padding: 1rem;
-            border: 1px solid #d1d5db;
-            border-radius: 0.5rem;
-            outline: none;
+            height: 120px;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
             resize: vertical;
-            font-family: inherit;
-            font-size: 1rem;
-            line-height: 1.5;
-            transition: border-color 0.2s;
         }
-        
-        textarea:focus {
-            border-color: #10b981;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-        }
-        
-        textarea::placeholder {
-            color: #9ca3af;
-        }
-        
-        .submit-button {
-            background: #10b981;
+        button {
+            background: #007bff;
             color: white;
+            padding: 12px 30px;
             border: none;
-            padding: 0.75rem 1.5rem;
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
-            font-weight: 500;
+            border-radius: 5px;
+            font-size: 16px;
             cursor: pointer;
-            transition: background-color 0.2s;
-            width: 100%;
+            margin-top: 10px;
         }
-        
-        .submit-button:hover:not(:disabled) {
-            background: #059669;
+        button:hover {
+            background: #0056b3;
         }
-        
-        .submit-button:disabled {
-            background: #d1d5db;
+        button:disabled {
+            background: #ccc;
             cursor: not-allowed;
         }
-        
         .message {
-            margin: 1rem 0;
-            padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.875rem;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
         }
-        
-        .message.success {
-            background: #d1fae5;
-            color: #065f46;
-            border: 1px solid #a7f3d0;
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
         }
-        
-        .message.error {
-            background: #fee2e2;
-            color: #991b1b;
-            border: 1px solid #fca5a5;
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
-        
-        .loading {
-            display: none;
-            text-align: center;
-            color: #6b7280;
-            font-size: 0.875rem;
-            padding: 1rem;
-        }
-        
-        .recent-workouts {
-            background: white;
-            border-radius: 0.75rem;
-            border: 1px solid #e5e7eb;
-            overflow: hidden;
-        }
-        
-        .recent-workouts h2 {
-            font-size: 1.125rem;
-            font-weight: 600;
-            color: #111827;
-            padding: 1.5rem 1.5rem 1rem;
-        }
-        
         .workout-item {
-            padding: 1rem 1.5rem;
-            border-bottom: 1px solid #f3f4f6;
+            padding: 15px;
+            margin: 10px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
         }
-        
-        .workout-item:last-child {
-            border-bottom: none;
-        }
-        
         .workout-header {
-            font-weight: 500;
-            color: #111827;
-            margin-bottom: 0.25rem;
+            font-weight: bold;
+            margin-bottom: 5px;
         }
-        
         .workout-details {
-            font-size: 0.875rem;
-            color: #6b7280;
+            color: #666;
+            font-size: 14px;
         }
-        
-        .workout-notes {
-            font-size: 0.75rem;
-            color: #9ca3af;
-            margin-top: 0.25rem;
-            font-style: italic;
+        .examples {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
         }
-        
-        .empty-state {
-            text-align: center;
-            padding: 3rem 1.5rem;
-            color: #6b7280;
+        .examples h3 {
+            margin-top: 0;
+            color: #495057;
         }
-        
-        @media (max-width: 640px) {
-            .container {
-                margin: 0;
-            }
-            
-            .main-content {
-                padding: 1rem;
-            }
-            
-            .header {
-                padding: 1rem;
-            }
+        .examples ul {
+            margin: 10px 0;
+            padding-left: 20px;
         }
-    &lt;/style&gt;
-&lt;/head&gt;
-&lt;body&gt;
-    &lt;div class="container"&gt;
-        &lt;div class="header"&gt;
-            &lt;h1&gt;Workout Logger&lt;/h1&gt;
-        &lt;/div&gt;
+        .examples li {
+            margin: 5px 0;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Workout Logger</h1>
         
-        &lt;div class="main-content"&gt;
-            &lt;div class="input-section"&gt;
-                &lt;div class="examples"&gt;
-                    &lt;h3&gt;Example inputs:&lt;/h3&gt;
-                    &lt;ul&gt;
-                        &lt;li&gt;"5 pull-ups, 10 push-ups"&lt;/li&gt;
-                        &lt;li&gt;"ran 5km in 25 minutes"&lt;/li&gt;
-                        &lt;li&gt;"bench press 3 sets of 8 reps at 80kg"&lt;/li&gt;
-                        &lt;li&gt;"squats 50kg 3x10 yesterday"&lt;/li&gt;
-                        &lt;li&gt;"100 push-ups, felt good"&lt;/li&gt;
-                    &lt;/ul&gt;
-                &lt;/div&gt;
-                
-                &lt;div class="input-form"&gt;
-                    &lt;form id="workoutForm"&gt;
-                        &lt;div class="input-wrapper"&gt;
-                            &lt;textarea 
-                                id="workoutInput" 
-                                placeholder="Describe your workout in natural language..."
-                                required
-                            &gt;&lt;/textarea&gt;
-                        &lt;/div&gt;
-                        &lt;button type="submit" class="submit-button" id="submitBtn"&gt;
-                            Log Workout
-                        &lt;/button&gt;
-                    &lt;/form&gt;
-                &lt;/div&gt;
-            &lt;/div&gt;
-            
-            &lt;div id="message"&gt;&lt;/div&gt;
-            &lt;div id="loading" class="loading"&gt;Processing your workout...&lt;/div&gt;
-            
-            &lt;div class="recent-workouts"&gt;
-                &lt;h2&gt;Recent Workouts&lt;/h2&gt;
-                &lt;div id="workoutsList"&gt;
-                    {% if recent_workouts %}
-                        {% for workout in recent_workouts %}
-                        &lt;div class="workout-item"&gt;
-                            &lt;div class="workout-header"&gt;
-                                {{ workout.date }} - {{ workout.exercise_name }} (Set {{ workout.set_number }})
-                            &lt;/div&gt;
-                            &lt;div class="workout-details"&gt;
-                                {% if workout.reps %}{{ workout.reps }} reps{% endif %}
-                                {% if workout.weight_kg %} at {{ workout.weight_kg }}kg{% endif %}
-                                {% if workout.distance_km %}{{ workout.distance_km }}km{% endif %}
-                                {% if workout.time_seconds %} in {{ (workout.time_seconds // 60) }}:{{ '%02d'|format(workout.time_seconds % 60) }}{% endif %}
-                            &lt;/div&gt;
-                            {% if workout.notes %}
-                            &lt;div class="workout-notes"&gt;
-                                Notes: {{ workout.notes }}
-                            &lt;/div&gt;
-                            {% endif %}
-                        &lt;/div&gt;
-                        {% endfor %}
-                    {% else %}
-                        &lt;div class="empty-state"&gt;
-                            No workouts logged yet. Start by describing your workout above!
-                        &lt;/div&gt;
-                    {% endif %}
-                &lt;/div&gt;
-            &lt;/div&gt;
-        &lt;/div&gt;
-    &lt;/div&gt;
+        <div class="examples">
+            <h3>Example inputs:</h3>
+            <ul>
+                <li>"5 pull-ups, 10 push-ups"</li>
+                <li>"ran 5km in 25 minutes"</li>
+                <li>"bench press 3 sets of 8 reps at 80kg"</li>
+                <li>"100 push-ups, felt good"</li>
+            </ul>
+        </div>
+        
+        <div class="input-section">
+            <form id="workoutForm">
+                <textarea 
+                    id="workoutInput" 
+                    placeholder="Describe your workout in natural language..."
+                    required
+                ></textarea>
+                <br>
+                <button type="submit" id="submitBtn">Log Workout</button>
+            </form>
+        </div>
+        
+        <div id="message"></div>
+        
+        <div class="recent-workouts">
+            <h2>Recent Workouts</h2>
+            <div id="workoutsList">
+                {% if recent_workouts %}
+                    {% for workout in recent_workouts %}
+                    <div class="workout-item">
+                        <div class="workout-header">
+                            {{ workout.date }} - {{ workout.exercise_name }} (Set {{ workout.set_number }})
+                        </div>
+                        <div class="workout-details">
+                            {% if workout.reps %}{{ workout.reps }} reps{% endif %}
+                            {% if workout.weight_kg %} at {{ workout.weight_kg }}kg{% endif %}
+                            {% if workout.distance_km %}{{ workout.distance_km }}km{% endif %}
+                            {% if workout.time_seconds %} in {{ (workout.time_seconds // 60) }}:{{ '%02d'|format(workout.time_seconds % 60) }}{% endif %}
+                            {% if workout.notes %} - {{ workout.notes }}{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="workout-item">
+                        <div class="workout-details">No workouts logged yet. Start by describing your workout above!</div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 
-    &lt;script&gt;
+    <script>
         document.getElementById('workoutForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const input = document.getElementById('workoutInput');
             const messageDiv = document.getElementById('message');
-            const loadingDiv = document.getElementById('loading');
             const submitBtn = document.getElementById('submitBtn');
             
             if (!input.value.trim()) {
-                messageDiv.innerHTML = '&lt;div class="message error"&gt;Please enter a workout description&lt;/div&gt;';
+                messageDiv.innerHTML = '<div class="message error">Please enter a workout description</div>';
                 return;
             }
             
-            // Show loading state
-            loadingDiv.style.display = 'block';
-            messageDiv.innerHTML = '';
             submitBtn.disabled = true;
             submitBtn.textContent = 'Processing...';
+            messageDiv.innerHTML = '';
             
             try {
                 const response = await fetch('/log', {
@@ -328,21 +188,19 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    messageDiv.innerHTML = '&lt;div class="message success"&gt;Workout logged successfully!&lt;/div&gt;';
+                    messageDiv.innerHTML = '<div class="message success">Workout logged successfully!</div>';
                     input.value = '';
-                    // Reload page to show new workout
-                    setTimeout(() =&gt; location.reload(), 1500);
+                    setTimeout(() => location.reload(), 1500);
                 } else {
-                    messageDiv.innerHTML = `&lt;div class="message error"&gt;Error: ${data.error}&lt;/div&gt;`;
+                    messageDiv.innerHTML = '<div class="message error">Error: ' + data.error + '</div>';
                 }
             } catch (error) {
-                messageDiv.innerHTML = `&lt;div class="message error"&gt;Network error: ${error.message}&lt;/div&gt;`;
+                messageDiv.innerHTML = '<div class="message error">Network error: ' + error.message + '</div>';
             } finally {
-                loadingDiv.style.display = 'none';
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Log Workout';
             }
         });
-    &lt;/script&gt;
-&lt;/body&gt;
-&lt;/html&gt;
+    </script>
+</body>
+</html>
