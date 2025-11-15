@@ -98,6 +98,7 @@ def test_supabase_connection(supabase_client):
         test_data = {
             'date': datetime.now().strftime('%Y-%m-%d'),
             'activity_name': 'connection_test',  # Updated column name
+            'activity_type': 'exercise',  # New activity type column (only exercise or measurement)
             'set_number': 1,
             'metric_type': 'test',
             'value': 1,
@@ -193,7 +194,7 @@ else:
     logger.error("💥 SYSTEM INITIALIZATION FAILED")
 
 class WorkoutLogger:
-    """Advanced workout logger with updated schema and notes support"""
+    """Advanced workout logger with improved notes handling and simplified activity types"""
     
     def __init__(self, gemini_model, supabase_client):
         if not gemini_model or not supabase_client:
@@ -202,11 +203,35 @@ class WorkoutLogger:
         self.supabase = supabase_client
         logger.info("💪 WorkoutLogger initialized successfully")
     
+    def determine_activity_type(self, activity_name: str) -> str:
+        """Determine if an activity is exercise or measurement (NO CARDIO CATEGORY)"""
+        activity_lower = activity_name.lower()
+        
+        # Body measurements - these are the ONLY things that get 'measurement' type
+        measurement_keywords = [
+            'weight', 'body weight', 'bodyweight', 'body fat', 'bodyfat', 'body mass',
+            'height', 'waist', 'chest', 'arm', 'leg', 'neck', 'hip', 'measurement',
+            'body composition', 'bmi', 'muscle mass', 'fat percentage', 'circumference'
+        ]
+        
+        # Check for measurements
+        if any(keyword in activity_lower for keyword in measurement_keywords):
+            return 'measurement'
+        
+        # EVERYTHING ELSE is 'exercise' - running, cycling, pull-ups, squats, etc.
+        return 'exercise'
+    
     def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
-        """Enhanced prompt for latest Gemini models with notes extraction"""
+        """Enhanced prompt with better notes handling and simplified activity types"""
         return f"""
 Today's date is {current_date}.
 You are an advanced fitness tracking AI. Convert the following workout description into structured JSON.
+
+CRITICAL INSTRUCTIONS FOR NOTES:
+- Notes should be associated with the SPECIFIC exercise they relate to
+- If notes mention a specific exercise, attach them ONLY to that exercise
+- If notes are general (like "good workout"), attach to the first exercise only
+- If no specific exercise is mentioned, attach to the exercise immediately before the note
 
 INSTRUCTIONS:
 - Extract the date from input if specified (e.g., 'today', 'yesterday', specific dates)
@@ -215,8 +240,7 @@ INSTRUCTIONS:
 - Use consistent activity names (e.g., "pull-up" not "pullup", "push-up" not "pushup")
 - Be smart about exercise variations (e.g., "chin-ups" vs "pull-ups")
 - ALL TIME VALUES must be in SECONDS (convert minutes to seconds: 5 min = 300 sec)
-- Extract any notes/comments like "felt strong", "shoulder pain", "easy", "difficult" etc.
-- If no notes/comments found, set notes to null
+- Activity types: ONLY 'exercise' or 'measurement' (NO CARDIO - running/cycling = exercise)
 
 INPUT: "{user_input}"
 
@@ -226,10 +250,11 @@ OUTPUT FORMAT (JSON only):
   "user_id": "{user_id}",
   "username": "User",
   "raw_input": "{user_input}",
-  "notes": "extracted notes or null",
   "exercises": [
     {{
       "name": "Activity Name",
+      "activity_type": "exercise|measurement",
+      "notes": "notes specific to THIS exercise only, or null",
       "sets": [
         {{
           "set_number": 1,
@@ -261,15 +286,26 @@ OUTPUT FORMAT (JSON only):
   ]
 }}
 
-EXAMPLES:
-- "5 pull ups, felt strong" → notes: "felt strong"
-- "ran 3km in 15 minutes, shoulder pain" → time: 900 (15*60), notes: "shoulder pain"
-- "bench press 80kg 5 reps, easy set" → notes: "easy set"
-- "10 push ups" → notes: null
+EXAMPLES OF PROPER NOTE HANDLING:
+- "5 pull ups, shoulder pain. 5 deadlifts 50kg" 
+  → pull-ups: notes="shoulder pain", deadlifts: notes=null
+  
+- "bench press 80kg 5 reps, easy set. squats 100kg 3 reps"
+  → bench press: notes="easy set", squats: notes=null
+  
+- "ran 5km in 25 minutes, felt tired. 10 push ups"
+  → running: notes="felt tired", push-ups: notes=null
+  
+- "weighed myself, 75kg. did 10 push ups, good form"
+  → body weight: notes=null, push-ups: notes="good form"
+
+ACTIVITY TYPE EXAMPLES (SIMPLIFIED):
+- "pull-ups", "bench press", "squats", "running", "cycling" → "exercise"
+- "body weight", "waist measurement", "body fat" → "measurement"
 """
     
     def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
-        """Parse user input using latest Gemini model"""
+        """Parse user input using latest Gemini model with improved notes handling"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
         
@@ -289,9 +325,14 @@ EXAMPLES:
             parsed_data = json.loads(json_string)
             logger.info("✅ Successfully parsed JSON from Gemini")
             
-            # Log if notes were extracted
-            if parsed_data.get('notes'):
-                logger.info(f"📝 Extracted notes: '{parsed_data['notes']}'")
+            # Post-process to ensure activity_type is set correctly
+            for exercise in parsed_data.get('exercises', []):
+                if 'activity_type' not in exercise or not exercise['activity_type']:
+                    exercise['activity_type'] = self.determine_activity_type(exercise.get('name', ''))
+                
+                # Log notes for debugging
+                if exercise.get('notes'):
+                    logger.info(f"📝 Notes for {exercise['name']}: '{exercise['notes']}'")
             
             return parsed_data
         except Exception as e:
@@ -300,7 +341,7 @@ EXAMPLES:
             raise
     
     def log_workout(self, workout_data: dict) -> bool:
-        """Log workout data to database with updated schema"""
+        """Log workout data to database with improved schema"""
         try:
             logger.info(f"📝 Logging workout data")
             
@@ -308,13 +349,14 @@ EXAMPLES:
             user_id = workout_data.get("user_id", "default_user")
             username = workout_data.get("username", "User")
             raw_input = workout_data.get("raw_input", "")
-            notes = workout_data.get("notes")  # Can be null
             
             # Prepare all rows for batch insert
             rows_to_insert = []
             
             for exercise in workout_data.get("exercises", []):
-                activity_name = exercise.get("name", "Unknown Activity")  # Updated field name
+                activity_name = exercise.get("name", "Unknown Activity")
+                activity_type = exercise.get("activity_type", "exercise")
+                exercise_notes = exercise.get("notes")  # Notes specific to this exercise
                 
                 for set_data in exercise.get("sets", []):
                     set_number = set_data.get("set_number", 1)
@@ -322,18 +364,18 @@ EXAMPLES:
                     # Each metric becomes one row
                     for metric in set_data.get("metrics", []):
                         if metric.get("value") is not None:
-                            # Use updated column names
                             row_data = {
                                 'date': log_date,
-                                'activity_name': activity_name,  # Updated column name
+                                'activity_name': activity_name,
+                                'activity_type': activity_type,  # Only 'exercise' or 'measurement'
                                 'set_number': set_number,
                                 'metric_type': metric.get("type"),
-                                'value': float(metric.get("value")),  # Ensure numeric
+                                'value': float(metric.get("value")),
                                 'unit': metric.get("unit"),
                                 'user_id': user_id,
                                 'username': username,
                                 'raw_input': raw_input,
-                                'notes': notes  # New notes field
+                                'notes': exercise_notes  # Exercise-specific notes
                             }
                             rows_to_insert.append(row_data)
             
@@ -350,6 +392,23 @@ EXAMPLES:
                 
                 if result.data:
                     logger.info(f"✅ Successfully inserted {len(result.data)} workout records")
+                    
+                    # Log summary of what was inserted
+                    activities_logged = {}
+                    for row in rows_to_insert:
+                        activity = row['activity_name']
+                        activity_type = row['activity_type']
+                        notes = row['notes']
+                        key = f"{activity} ({activity_type})"
+                        if key not in activities_logged:
+                            activities_logged[key] = {'count': 0, 'notes': notes}
+                        activities_logged[key]['count'] += 1
+                    
+                    logger.info("📋 Activities logged:")
+                    for activity, info in activities_logged.items():
+                        notes_str = f" - Notes: {info['notes']}" if info['notes'] else ""
+                        logger.info(f"   • {activity}: {info['count']} records{notes_str}")
+                    
                     return True
                 else:
                     logger.error("❌ Insert returned no data")
@@ -368,7 +427,7 @@ EXAMPLES:
                     logger.error("🚨 This looks like a schema/column issue!")
                     logger.error("💡 Possible solutions:")
                     logger.error("   1. Run the database migration script first")
-                    logger.error("   2. Check if 'activity_name' and 'notes' columns exist")
+                    logger.error("   2. Check if 'activity_name', 'activity_type', and 'notes' columns exist")
                     logger.error("   3. Verify RLS (Row Level Security) policies")
                 
                 return False
@@ -381,7 +440,7 @@ EXAMPLES:
     def delete_latest_exercise(self, user_id: str = "default_user") -> bool:
         """Delete the most recent exercise entry"""
         try:
-            # Get the latest exercise entry (using updated column name)
+            # Get the latest exercise entry
             result = self.supabase.table('activity_logs')\
                 .select('date, activity_name')\
                 .eq('user_id', user_id)\
@@ -406,20 +465,26 @@ EXAMPLES:
             logger.error(f"❌ Error deleting activity: {e}")
             return False
     
-    def get_recent_workouts(self, days: int = 7, user_id: str = "default_user") -> list:
-        """Get recent workout data"""
+    def get_recent_workouts(self, days: int = 7, user_id: str = "default_user", activity_type: str = None) -> list:
+        """Get recent workout data, optionally filtered by activity type"""
         try:
             cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             
-            result = self.supabase.table('activity_logs')\
+            query = self.supabase.table('activity_logs')\
                 .select('*')\
                 .eq('user_id', user_id)\
-                .gte('date', cutoff_date)\
-                .order('created_at', desc=True)\
-                .limit(50)\
-                .execute()
+                .gte('date', cutoff_date)
+            
+            # Add activity type filter if specified
+            if activity_type:
+                query = query.eq('activity_type', activity_type)
+            
+            result = query.order('created_at', desc=True).limit(50).execute()
             
             logger.info(f"📊 Retrieved {len(result.data)} recent workout records")
+            if activity_type:
+                logger.info(f"🎯 Filtered by activity type: {activity_type}")
+            
             return result.data
         except Exception as e:
             logger.error(f"❌ Error getting workouts: {e}")
@@ -445,7 +510,7 @@ def index():
 
 @app.route('/log', methods=['POST'])
 def log_workout():
-    """Handle workout logging"""
+    """Handle workout logging with improved notes handling"""
     if not workout_logger:
         logger.error("❌ Workout logger not available - system not initialized")
         return jsonify({
@@ -477,13 +542,23 @@ def log_workout():
             success = workout_logger.log_workout(parsed_data)
             
             if success:
-                # Include notes in success message if present
-                notes_msg = ""
-                if parsed_data.get('notes'):
-                    notes_msg = f" (Notes: {parsed_data['notes']})"
+                # Create detailed success message
+                activities = []
+                for exercise in parsed_data.get('exercises', []):
+                    activity_name = exercise.get('name', 'Unknown')
+                    activity_type = exercise.get('activity_type', 'exercise')
+                    notes = exercise.get('notes')
+                    
+                    activity_str = f"{activity_name} ({activity_type})"
+                    if notes:
+                        activity_str += f" - {notes}"
+                    activities.append(activity_str)
+                
+                activities_msg = "; ".join(activities)
                 return jsonify({
                     'success': True, 
-                    'message': f'Workout logged successfully with {working_model_name}!{notes_msg}'
+                    'message': f'Logged: {activities_msg}',
+                    'model': working_model_name
                 })
             else:
                 return jsonify({'success': False, 'error': 'Failed to log workout - check server logs for details'})
@@ -498,7 +573,9 @@ def get_workouts():
     if not workout_logger:
         return jsonify([])
     
-    workouts = workout_logger.get_recent_workouts()
+    # Get optional activity type filter
+    activity_type = request.args.get('type')
+    workouts = workout_logger.get_recent_workouts(activity_type=activity_type)
     return jsonify(workouts)
 
 @app.route('/health')
@@ -518,7 +595,14 @@ def health():
         'active_model': working_model_name if working_model_name else 'None',
         'model_preference_order': GEMINI_MODEL_NAMES,
         'environment_variables': env_vars,
-        'schema_version': '2.0 - activity_name, notes, time_in_seconds',
+        'schema_version': '2.2 - activity_name, activity_type (exercise/measurement only), notes_per_exercise',
+        'features': [
+            'Exercise-specific notes handling',
+            'Simplified activity types: exercise OR measurement only',
+            'Latest Gemini 2.5 Flash support',
+            'Improved error handling'
+        ],
+        'activity_types': ['exercise', 'measurement'],  # Only these two
         'timestamp': datetime.now().isoformat()
     })
 
@@ -568,9 +652,34 @@ def test_database():
         
         return jsonify({
             'connection_test': 'passed' if connection_ok else 'failed',
-            'schema_version': '2.0 - activity_name, notes, time_in_seconds',
+            'schema_version': '2.2 - activity_name, activity_type (exercise/measurement only), notes_per_exercise',
+            'activity_types': ['exercise', 'measurement'],
             'timestamp': datetime.now().isoformat()
         })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+@app.route('/stats')
+def get_stats():
+    """Get activity statistics by type (simplified)"""
+    if not workout_logger:
+        return jsonify({'error': 'Workout logger not available'})
+    
+    try:
+        # Get data for the two activity types
+        exercises = workout_logger.get_recent_workouts(days=30, activity_type='exercise')
+        measurements = workout_logger.get_recent_workouts(days=30, activity_type='measurement')
+        
+        stats = {
+            'exercise_count': len(exercises),
+            'measurement_count': len(measurements),
+            'total_activities': len(exercises) + len(measurements),
+            'recent_exercises': exercises[:5],
+            'recent_measurements': measurements[:5],
+            'activity_types': ['exercise', 'measurement']  # Only these two
+        }
+        
+        return jsonify(stats)
     except Exception as e:
         return jsonify({'error': str(e)})
 
@@ -579,5 +688,6 @@ if __name__ == '__main__':
     logger.info(f"🌐 Starting Flask app on port {port}")
     if working_model_name:
         logger.info(f"🤖 Powered by: {working_model_name}")
-    logger.info("🔄 Schema version: 2.0 (activity_name, notes, time_in_seconds)")
+    logger.info("🔄 Schema version: 2.2 (activity_name, activity_type: exercise/measurement only)")
+    logger.info("✨ Features: Exercise-specific notes, Simplified activity types")
     app.run(host='0.0.0.0', port=port, debug=False)
