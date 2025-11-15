@@ -236,7 +236,7 @@ CRITICAL INSTRUCTIONS FOR NOTES:
 INSTRUCTIONS:
 - Extract the date from input if specified (e.g., 'today', 'yesterday', specific dates)
 - Use today's date if no date is specified
-- Return ONLY valid JSON, no additional text
+- Return ONLY valid JSON, no additional text or explanations
 - Use consistent activity names (e.g., "pull-up" not "pullup", "push-up" not "pushup")
 - Be smart about exercise variations (e.g., "chin-ups" vs "pull-ups")
 - ALL TIME VALUES must be in SECONDS (convert minutes to seconds: 5 min = 300 sec)
@@ -253,7 +253,7 @@ OUTPUT FORMAT (JSON only):
   "exercises": [
     {{
       "name": "Activity Name",
-      "activity_type": "exercise|measurement",
+      "activity_type": "exercise",
       "notes": "notes specific to THIS exercise only, or null",
       "sets": [
         {{
@@ -304,8 +304,129 @@ ACTIVITY TYPE EXAMPLES (SIMPLIFIED):
 - "body weight", "waist measurement", "body fat" → "measurement"
 """
     
+    def validate_and_fix_parsed_data(self, parsed_data: dict) -> dict:
+        """Validate and fix common issues with parsed data from Gemini"""
+        try:
+            # Ensure we have the basic structure
+            if not isinstance(parsed_data, dict):
+                logger.error(f"❌ Parsed data is not a dict: {type(parsed_data)}")
+                raise ValueError(f"Expected dict, got {type(parsed_data)}")
+            
+            # Ensure exercises is a list
+            if 'exercises' not in parsed_data:
+                parsed_data['exercises'] = []
+            elif not isinstance(parsed_data['exercises'], list):
+                logger.warning(f"⚠️ 'exercises' is not a list: {type(parsed_data['exercises'])}")
+                # Try to convert to list if it's a single exercise
+                if isinstance(parsed_data['exercises'], dict):
+                    parsed_data['exercises'] = [parsed_data['exercises']]
+                else:
+                    parsed_data['exercises'] = []
+            
+            # Validate each exercise
+            valid_exercises = []
+            for i, exercise in enumerate(parsed_data.get('exercises', [])):
+                try:
+                    if not isinstance(exercise, dict):
+                        logger.warning(f"⚠️ Exercise {i} is not a dict: {type(exercise)}")
+                        continue
+                    
+                    # Ensure required fields
+                    if 'name' not in exercise:
+                        exercise['name'] = f"Unknown Exercise {i+1}"
+                    
+                    if 'activity_type' not in exercise or not exercise['activity_type']:
+                        exercise['activity_type'] = self.determine_activity_type(exercise.get('name', ''))
+                    
+                    # Ensure sets is a list
+                    if 'sets' not in exercise:
+                        exercise['sets'] = []
+                    elif not isinstance(exercise['sets'], list):
+                        if isinstance(exercise['sets'], dict):
+                            exercise['sets'] = [exercise['sets']]
+                        else:
+                            exercise['sets'] = []
+                    
+                    # Validate each set
+                    valid_sets = []
+                    for j, set_data in enumerate(exercise.get('sets', [])):
+                        try:
+                            if not isinstance(set_data, dict):
+                                logger.warning(f"⚠️ Set {j} in exercise {i} is not a dict: {type(set_data)}")
+                                continue
+                            
+                            # Ensure set_number
+                            if 'set_number' not in set_data:
+                                set_data['set_number'] = j + 1
+                            
+                            # Ensure metrics is a list
+                            if 'metrics' not in set_data:
+                                set_data['metrics'] = []
+                            elif not isinstance(set_data['metrics'], list):
+                                if isinstance(set_data['metrics'], dict):
+                                    set_data['metrics'] = [set_data['metrics']]
+                                else:
+                                    set_data['metrics'] = []
+                            
+                            # Validate each metric
+                            valid_metrics = []
+                            for k, metric in enumerate(set_data.get('metrics', [])):
+                                try:
+                                    if not isinstance(metric, dict):
+                                        logger.warning(f"⚠️ Metric {k} is not a dict: {type(metric)}")
+                                        continue
+                                    
+                                    # Ensure required metric fields
+                                    if 'type' not in metric or 'value' not in metric:
+                                        logger.warning(f"⚠️ Metric {k} missing type or value")
+                                        continue
+                                    
+                                    if metric.get('value') is not None:
+                                        valid_metrics.append(metric)
+                                
+                                except Exception as metric_error:
+                                    logger.error(f"❌ Error validating metric {k}: {metric_error}")
+                                    continue
+                            
+                            set_data['metrics'] = valid_metrics
+                            if valid_metrics:  # Only add sets that have valid metrics
+                                valid_sets.append(set_data)
+                        
+                        except Exception as set_error:
+                            logger.error(f"❌ Error validating set {j}: {set_error}")
+                            continue
+                    
+                    exercise['sets'] = valid_sets
+                    if valid_sets:  # Only add exercises that have valid sets
+                        valid_exercises.append(exercise)
+                
+                except Exception as exercise_error:
+                    logger.error(f"❌ Error validating exercise {i}: {exercise_error}")
+                    continue
+            
+            parsed_data['exercises'] = valid_exercises
+            
+            # Ensure other required fields
+            if 'date' not in parsed_data:
+                parsed_data['date'] = datetime.now().strftime('%Y-%m-%d')
+            if 'user_id' not in parsed_data:
+                parsed_data['user_id'] = "default_user"
+            if 'username' not in parsed_data:
+                parsed_data['username'] = "User"
+            if 'raw_input' not in parsed_data:
+                parsed_data['raw_input'] = ""
+            
+            logger.info(f"✅ Validated data: {len(valid_exercises)} exercises")
+            return parsed_data
+        
+        except Exception as e:
+            logger.error(f"❌ Error validating parsed data: {e}")
+            logger.error(f"🔍 Raw data type: {type(parsed_data)}")
+            logger.error(f"🔍 Raw data: {str(parsed_data)[:200]}...")
+            raise
+    
     def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
-        """Parse user input using latest Gemini model with improved notes handling"""
+        """Parse user input using latest Gemini model with improved error handling"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
         
@@ -315,29 +436,42 @@ ACTIVITY TYPE EXAMPLES (SIMPLIFIED):
             response = self.gemini_model.generate_content(prompt)
             response_text = response.text
             
+            logger.info(f"📝 Raw Gemini response: {response_text[:300]}...")
+            
             # Extract JSON from response
             json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
+                logger.info("✅ Found JSON block in response")
             else:
                 json_string = response_text.strip()
+                logger.info("⚠️ No JSON block found, using raw response")
             
-            parsed_data = json.loads(json_string)
-            logger.info("✅ Successfully parsed JSON from Gemini")
+            logger.info(f"🔍 Attempting to parse JSON: {json_string[:200]}...")
             
-            # Post-process to ensure activity_type is set correctly
-            for exercise in parsed_data.get('exercises', []):
-                if 'activity_type' not in exercise or not exercise['activity_type']:
-                    exercise['activity_type'] = self.determine_activity_type(exercise.get('name', ''))
-                
-                # Log notes for debugging
+            try:
+                parsed_data = json.loads(json_string)
+                logger.info(f"✅ Successfully parsed JSON: {type(parsed_data)}")
+            except json.JSONDecodeError as json_error:
+                logger.error(f"❌ JSON decode error: {json_error}")
+                logger.error(f"🔍 Problematic JSON: {json_string}")
+                raise ValueError(f"Invalid JSON from Gemini: {json_error}")
+            
+            # Validate and fix the parsed data
+            validated_data = self.validate_and_fix_parsed_data(parsed_data)
+            
+            # Log notes for debugging
+            for exercise in validated_data.get('exercises', []):
                 if exercise.get('notes'):
                     logger.info(f"📝 Notes for {exercise['name']}: '{exercise['notes']}'")
             
-            return parsed_data
+            return validated_data
+            
         except Exception as e:
             logger.error(f"❌ Error parsing input: {e}")
-            logger.error(f"Raw response: {response_text[:200]}...")
+            logger.error(f"🔍 Error type: {type(e).__name__}")
+            if 'response_text' in locals():
+                logger.error(f"🔍 Raw response: {response_text[:200]}...")
             raise
     
     def log_workout(self, workout_data: dict) -> bool:
@@ -510,7 +644,7 @@ def index():
 
 @app.route('/log', methods=['POST'])
 def log_workout():
-    """Handle workout logging with improved notes handling"""
+    """Handle workout logging with improved error handling"""
     if not workout_logger:
         logger.error("❌ Workout logger not available - system not initialized")
         return jsonify({
@@ -522,6 +656,8 @@ def log_workout():
         user_input = request.json.get('input', '').strip()
         if not user_input:
             return jsonify({'success': False, 'error': 'No input provided'})
+        
+        logger.info(f"🎯 Processing input: '{user_input}'")
         
         # Check if this is an edit command
         edit_keywords = ['delete', 'remove', 'edit', 'undo', 'clear']
@@ -538,33 +674,45 @@ def log_workout():
                 return jsonify({'success': False, 'error': 'Edit command not recognized'})
         else:
             # Handle workout logging
-            parsed_data = workout_logger.parse_input(user_input)
-            success = workout_logger.log_workout(parsed_data)
-            
-            if success:
-                # Create detailed success message
-                activities = []
-                for exercise in parsed_data.get('exercises', []):
-                    activity_name = exercise.get('name', 'Unknown')
-                    activity_type = exercise.get('activity_type', 'exercise')
-                    notes = exercise.get('notes')
-                    
-                    activity_str = f"{activity_name} ({activity_type})"
-                    if notes:
-                        activity_str += f" - {notes}"
-                    activities.append(activity_str)
+            try:
+                parsed_data = workout_logger.parse_input(user_input)
+                logger.info(f"✅ Successfully parsed input")
                 
-                activities_msg = "; ".join(activities)
+                success = workout_logger.log_workout(parsed_data)
+                
+                if success:
+                    # Create detailed success message
+                    activities = []
+                    for exercise in parsed_data.get('exercises', []):
+                        activity_name = exercise.get('name', 'Unknown')
+                        activity_type = exercise.get('activity_type', 'exercise')
+                        notes = exercise.get('notes')
+                        
+                        activity_str = f"{activity_name} ({activity_type})"
+                        if notes:
+                            activity_str += f" - {notes}"
+                        activities.append(activity_str)
+                    
+                    activities_msg = "; ".join(activities)
+                    return jsonify({
+                        'success': True, 
+                        'message': f'Logged: {activities_msg}',
+                        'model': working_model_name
+                    })
+                else:
+                    return jsonify({'success': False, 'error': 'Failed to log workout - check server logs for details'})
+            
+            except Exception as parse_error:
+                logger.error(f"❌ Parsing error: {parse_error}")
+                logger.error(f"🔍 Error type: {type(parse_error).__name__}")
                 return jsonify({
-                    'success': True, 
-                    'message': f'Logged: {activities_msg}',
-                    'model': working_model_name
+                    'success': False, 
+                    'error': f'Failed to parse input: {str(parse_error)[:100]}...'
                 })
-            else:
-                return jsonify({'success': False, 'error': 'Failed to log workout - check server logs for details'})
     
     except Exception as e:
         logger.error(f"❌ Exception in log_workout: {e}")
+        logger.error(f"🔍 Error type: {type(e).__name__}")
         return jsonify({'success': False, 'error': f'Error: {str(e)}'})
 
 @app.route('/workouts')
@@ -600,7 +748,8 @@ def health():
             'Exercise-specific notes handling',
             'Simplified activity types: exercise OR measurement only',
             'Latest Gemini 2.5 Flash support',
-            'Improved error handling'
+            'Improved error handling and data validation',
+            'Fixed list object attribute errors'
         ],
         'activity_types': ['exercise', 'measurement'],  # Only these two
         'timestamp': datetime.now().isoformat()
@@ -689,5 +838,5 @@ if __name__ == '__main__':
     if working_model_name:
         logger.info(f"🤖 Powered by: {working_model_name}")
     logger.info("🔄 Schema version: 2.2 (activity_name, activity_type: exercise/measurement only)")
-    logger.info("✨ Features: Exercise-specific notes, Simplified activity types")
+    logger.info("✨ Features: Exercise-specific notes, Simplified activity types, Fixed list errors")
     app.run(host='0.0.0.0', port=port, debug=False)
