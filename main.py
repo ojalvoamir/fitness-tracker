@@ -1,285 +1,262 @@
-
 import os
 import json
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-import re
-
-from flask import Flask, request, jsonify, render_template_string
+from datetime import datetime
+from flask import Flask, request, render_template_string, jsonify
 import google.generativeai as genai
 from supabase import create_client, Client
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 app = Flask(__name__)
 
-# Configuration - FIXED VARIABLE NAMES
-GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')  # ✅ FIXED: was GEMINI_API_KEY
-SUPABASE_URL = os.environ.get('SUPABASE_URL') 
-SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY')
+# Configure Gemini API
+genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Initialize services
-if not all([GOOGLE_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY]):
-    logger.error("Missing required environment variables")
-    logger.error(f"GOOGLE_API_KEY: {'✅' if GOOGLE_API_KEY else '❌'}")
-    logger.error(f"SUPABASE_URL: {'✅' if SUPABASE_URL else '❌'}")
-    logger.error(f"SUPABASE_ANON_KEY: {'✅' if SUPABASE_ANON_KEY else '❌'}")
-    exit(1)
+# Configure Supabase
+supabase_url = os.getenv('SUPABASE_URL')
+supabase_key = os.getenv('SUPABASE_ANON_KEY')
+supabase: Client = create_client(supabase_url, supabase_key)
 
-genai.configure(api_key=GOOGLE_API_KEY)  # ✅ FIXED: was GEMINI_API_KEY
-model = genai.GenerativeModel('models/gemini-2.5-flash')
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
-class WorkoutParser:
-    """Simple, clean workout parser that trusts Gemini's natural abilities"""
+def parse_workout_with_gemini(user_input: str) -> dict:
+    """Parse natural language workout input using Gemini AI"""
     
-    def __init__(self):
-        self.model = model
+    prompt = f"""
+    Parse this workout description into structured JSON format.
     
-    def parse_workout(self, user_input: str, user_id: str = "default_user") -> Dict[str, Any]:
-        """Parse workout input using Gemini - clean and simple"""
-        current_date = datetime.now().strftime('%Y-%m-%d')
-        
-        # CLEAN prompt - no micromanagement, just clear requirements
-        prompt = f"""
-Today's date is {current_date}.
-Convert this workout description into structured JSON.
-
-REQUIREMENTS:
-1. If multiple dates mentioned, create separate entries for each
-2. ALWAYS return {{"entries": [...]}} format - never a raw array
-3. Convert time formats (45:18 becomes 2718 seconds)
-4. Use standard exercise names
-
-INPUT: "{user_input}"
-
-OUTPUT:
-{{
-  "entries": [
+    Input: "{user_input}"
+    
+    Return ONLY valid JSON in this exact format:
     {{
-      "date": "YYYY-MM-DD",
-      "user_id": "{user_id}",
-      "username": "User",
-      "raw_input": "relevant portion",
-      "exercises": [
-        {{
-          "name": "exercise name",
-          "activity_type": "exercise",
-          "notes": "any notes or null",
-          "sets": [
+        "date": "YYYY-MM-DD",
+        "exercises": [
             {{
-              "set_number": 1,
-              "metrics": [
-                {{"type": "reps", "value": 10, "unit": "reps"}},
-                {{"type": "weight", "value": 50, "unit": "kg"}},
-                {{"type": "time", "value": 300, "unit": "sec"}},
-                {{"type": "distance", "value": 5, "unit": "km"}}
-              ]
+                "activity_name": "exercise name",
+                "sets": [
+                    {{
+                        "set_number": 1,
+                        "metrics": [
+                            {{"metric_type": "reps", "value": 10, "unit": "reps"}},
+                            {{"metric_type": "weight", "value": 50, "unit": "kg"}}
+                        ]
+                    }}
+                ]
             }}
-          ]
-        }}
-      ]
+        ]
     }}
-  ]
-}}
-"""
+    
+    Rules:
+    - Use today's date if no date specified: {datetime.now().strftime('%Y-%m-%d')}
+    - Standardize exercise names (e.g., "pullup" -> "pull-up")
+    - Common metric types: reps, weight, distance, time, rounds
+    - Common units: reps, kg, lbs, km, miles, seconds, minutes
+    - For Cindy workout: use "rounds" metric with default 20 minutes time
+    """
+    
+    try:
+        response = model.generate_content(prompt)
+        # Clean the response to extract JSON
+        response_text = response.text.strip()
         
-        try:
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
-            
-            # Clean up response
-            if '```json' in response_text:
-                response_text = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL).group(1)
-            elif '```' in response_text:
-                response_text = re.search(r'```(.*?)```', response_text, re.DOTALL).group(1)
-            
-            parsed_data = json.loads(response_text)
-            
-            # Validate structure
-            if not isinstance(parsed_data, dict):
-                raise ValueError(f"Expected dict, got {type(parsed_data)}")
-            
-            if "entries" not in parsed_data:
-                raise ValueError("Response missing 'entries' key")
-            
-            if not isinstance(parsed_data["entries"], list):
-                raise ValueError("'entries' must be an array")
-            
-            logger.info(f"✅ Successfully parsed {len(parsed_data['entries'])} entries")
-            return parsed_data
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {e}")
-            logger.error(f"Raw response: {response_text}")
-            raise ValueError(f"Invalid JSON from Gemini: {e}")
-        except Exception as e:
-            logger.error(f"Parsing error: {e}")
-            raise
+        # Remove markdown code blocks if present
+        if response_text.startswith('```json'):
+            response_text = response_text[7:]
+        if response_text.endswith('```'):
+            response_text = response_text[:-3]
+        
+        return json.loads(response_text.strip())
+    except Exception as e:
+        print(f"Error parsing with Gemini: {e}")
+        raise
 
-class DatabaseLogger:
-    """Simple database operations"""
+def log_to_supabase(workout_data: dict, raw_input: str):
+    """Log parsed workout data to Supabase activity_logs table"""
     
-    def __init__(self):
-        self.supabase = supabase
-    
-    def log_workout_entries(self, entries: List[Dict[str, Any]]) -> List[str]:
-        """Log multiple workout entries to database"""
-        workout_ids = []
+    try:
+        workout_date = workout_data.get('date', datetime.now().strftime('%Y-%m-%d'))
         
-        for entry in entries:
-            try:
-                # Insert workout
-                workout_data = {
-                    'date': entry['date'],
-                    'user_id': entry['user_id'],
-                    'username': entry['username'],
-                    'raw_input': entry['raw_input']
-                }
+        for exercise in workout_data.get('exercises', []):
+            activity_name = exercise.get('activity_name', 'Unknown')
+            
+            for set_data in exercise.get('sets', []):
+                set_number = set_data.get('set_number', 1)
                 
-                workout_result = self.supabase.table('workouts').insert(workout_data).execute()
-                workout_id = workout_result.data[0]['id']
-                workout_ids.append(workout_id)
-                
-                # Insert exercises
-                for exercise in entry.get('exercises', []):
-                    exercise_data = {
-                        'workout_id': workout_id,
-                        'name': exercise['name'],
-                        'activity_type': exercise.get('activity_type', 'exercise'),
-                        'notes': exercise.get('notes')
+                # Insert each metric as a separate row
+                for metric in set_data.get('metrics', []):
+                    row_data = {
+                        'date': workout_date,
+                        'activity_name': activity_name,
+                        'set_number': set_number,
+                        'metric_type': metric.get('metric_type'),
+                        'value': metric.get('value'),
+                        'unit': metric.get('unit'),
+                        'user_id': 'default_user',
+                        'username': 'User',
+                        'raw_input': raw_input,
+                        'notes': None
                     }
                     
-                    exercise_result = self.supabase.table('exercises').insert(exercise_data).execute()
-                    exercise_id = exercise_result.data[0]['id']
+                    # Insert into activity_logs table
+                    result = supabase.table('activity_logs').insert(row_data).execute()
                     
-                    # Insert sets and metrics
-                    for set_data in exercise.get('sets', []):
-                        set_info = {
-                            'exercise_id': exercise_id,
-                            'set_number': set_data['set_number']
-                        }
-                        
-                        set_result = self.supabase.table('exercise_sets').insert(set_info).execute()
-                        set_id = set_result.data[0]['id']
-                        
-                        # Insert metrics
-                        for metric in set_data.get('metrics', []):
-                            if metric['value'] is not None:
-                                metric_data = {
-                                    'set_id': set_id,
-                                    'metric_type': metric['type'],
-                                    'value': metric['value'],
-                                    'unit': metric['unit']
-                                }
-                                self.supabase.table('exercise_metrics').insert(metric_data).execute()
-                
-                logger.info(f"✅ Logged workout entry for {entry['date']}")
-                
-            except Exception as e:
-                logger.error(f"Database error for entry {entry.get('date', 'unknown')}: {e}")
-                raise
+        print(f"✅ Successfully logged workout to Supabase")
+        return True
         
-        return workout_ids
+    except Exception as e:
+        print(f"❌ Error logging to Supabase: {e}")
+        raise
 
-# Initialize components
-parser = WorkoutParser()
-db_logger = DatabaseLogger()
+def get_recent_workouts(limit=10):
+    """Retrieve recent workouts from Supabase"""
+    try:
+        result = supabase.table('activity_logs').select('*').order('created_at', desc=True).limit(limit).execute()
+        return result.data
+    except Exception as e:
+        print(f"Error retrieving workouts: {e}")
+        return []
 
-# Simple HTML template
+# HTML Template
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Simple Workout Logger</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workout Logger</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            max-width: 600px; 
-            margin: 50px auto; 
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
             padding: 20px;
-            background: #f5f5f5;
+            background-color: #f5f5f5;
         }
         .container {
             background: white;
             padding: 30px;
-            border-radius: 10px;
+            border-radius: 12px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
         }
-        h1 { color: #333; text-align: center; }
-        textarea { 
-            width: 100%; 
-            height: 120px; 
-            padding: 15px; 
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .input-section {
+            margin-bottom: 30px;
+        }
+        textarea {
+            width: 100%;
+            padding: 15px;
             border: 2px solid #ddd;
-            border-radius: 5px;
+            border-radius: 8px;
             font-size: 16px;
+            min-height: 100px;
             resize: vertical;
         }
-        button { 
-            width: 100%; 
-            padding: 15px; 
-            background: #007bff; 
-            color: white; 
-            border: none; 
-            border-radius: 5px; 
+        button {
+            background: #007AFF;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
             font-size: 16px;
             cursor: pointer;
-            margin-top: 15px;
+            width: 100%;
+            margin-top: 10px;
         }
-        button:hover { background: #0056b3; }
-        .result { 
-            margin-top: 20px; 
-            padding: 15px; 
-            border-radius: 5px; 
-            display: none;
+        button:hover {
+            background: #0056CC;
         }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .examples {
-            margin-top: 20px;
+        .recent-workouts {
+            margin-top: 30px;
+        }
+        .workout-item {
+            background: #f8f9fa;
             padding: 15px;
-            background: #e9ecef;
-            border-radius: 5px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #007AFF;
         }
-        .examples h3 { margin-top: 0; color: #495057; }
-        .examples ul { margin: 10px 0; }
-        .examples li { margin: 5px 0; color: #6c757d; }
+        .message {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            color: #666;
+        }
+        .examples {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .examples h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        .examples ul {
+            margin: 0;
+            padding-left: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🏋️ Simple Workout Logger</h1>
-        
-        <form id="workoutForm">
-            <textarea 
-                id="workoutInput" 
-                placeholder="Describe your workout in natural language...
-
-Examples:
-• 5 pull-ups, 10 push-ups
-• yesterday: ran 5k in 25 minutes  
-• bodyweight 75kg, then 3x8 squats at 60kg
-• a week ago: did some pullups and felt good"
-                required
-            ></textarea>
-            <button type="submit">Log Workout</button>
-        </form>
-        
-        <div id="result" class="result"></div>
+        <h1>💪 Workout Logger</h1>
         
         <div class="examples">
-            <h3>💡 Tips</h3>
+            <h3>Example inputs:</h3>
             <ul>
-                <li>Use natural language - the AI understands typos and variations</li>
-                <li>Mention dates like "yesterday", "last week", or specific dates</li>
-                <li>Include details like weight, reps, time, distance</li>
-                <li>Multiple exercises in one input work fine</li>
+                <li>"5 pull-ups, 10 push-ups"</li>
+                <li>"ran 5km in 25 minutes"</li>
+                <li>"bench press 3 sets of 8 reps at 80kg"</li>
+                <li>"cindy 5 rounds"</li>
+                <li>"squats 50kg 3x10 yesterday"</li>
             </ul>
+        </div>
+        
+        <div class="input-section">
+            <form id="workoutForm">
+                <textarea 
+                    id="workoutInput" 
+                    placeholder="Describe your workout in natural language..."
+                    required
+                ></textarea>
+                <button type="submit">Log Workout</button>
+            </form>
+        </div>
+        
+        <div id="message"></div>
+        <div id="loading" class="loading">Processing your workout...</div>
+        
+        <div class="recent-workouts">
+            <h2>Recent Workouts</h2>
+            <div id="workoutsList">
+                {% for workout in recent_workouts %}
+                <div class="workout-item">
+                    <strong>{{ workout.date }}</strong> - 
+                    {{ workout.activity_name }} 
+                    (Set {{ workout.set_number }})
+                    <br>
+                    {{ workout.metric_type }}: {{ workout.value }} {{ workout.unit or '' }}
+                    {% if workout.raw_input %}
+                    <br><small>Original: "{{ workout.raw_input }}"</small>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
         </div>
     </div>
 
@@ -287,44 +264,45 @@ Examples:
         document.getElementById('workoutForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const input = document.getElementById('workoutInput').value;
-            const result = document.getElementById('result');
-            const button = document.querySelector('button');
+            const input = document.getElementById('workoutInput');
+            const messageDiv = document.getElementById('message');
+            const loadingDiv = document.getElementById('loading');
+            
+            if (!input.value.trim()) {
+                messageDiv.innerHTML = '<div class="message error">Please enter a workout description</div>';
+                return;
+            }
             
             // Show loading
-            button.textContent = 'Logging...';
-            button.disabled = true;
-            result.style.display = 'none';
+            loadingDiv.style.display = 'block';
+            messageDiv.innerHTML = '';
             
             try {
                 const response = await fetch('/log', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ input: input })
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        workout: input.value
+                    })
                 });
                 
                 const data = await response.json();
                 
-                if (response.ok) {
-                    result.className = 'result success';
-                    result.innerHTML = `
-                        <strong>✅ Success!</strong><br>
-                        Logged ${data.entries_logged} workout entries<br>
-                        <small>Workout IDs: ${data.workout_ids.join(', ')}</small>
-                    `;
-                    document.getElementById('workoutInput').value = '';
+                if (data.success) {
+                    messageDiv.innerHTML = '<div class="message success">✅ Workout logged successfully!</div>';
+                    input.value = '';
+                    // Reload page to show new workout
+                    setTimeout(() => location.reload(), 1500);
                 } else {
-                    throw new Error(data.error || 'Unknown error');
+                    messageDiv.innerHTML = `<div class="message error">❌ Error: ${data.error}</div>`;
                 }
-                
             } catch (error) {
-                result.className = 'result error';
-                result.innerHTML = `<strong>❌ Error:</strong> ${error.message}`;
+                messageDiv.innerHTML = `<div class="message error">❌ Network error: ${error.message}</div>`;
+            } finally {
+                loadingDiv.style.display = 'none';
             }
-            
-            result.style.display = 'block';
-            button.textContent = 'Log Workout';
-            button.disabled = false;
         });
     </script>
 </body>
@@ -333,45 +311,29 @@ Examples:
 
 @app.route('/')
 def index():
-    """Simple workout logging interface"""
-    return render_template_string(HTML_TEMPLATE)
+    recent_workouts = get_recent_workouts(10)
+    return render_template_string(HTML_TEMPLATE, recent_workouts=recent_workouts)
 
 @app.route('/log', methods=['POST'])
 def log_workout():
-    """Log workout endpoint - clean and simple"""
     try:
         data = request.get_json()
-        user_input = data.get('input', '').strip()
+        workout_input = data.get('workout', '').strip()
         
-        if not user_input:
-            return jsonify({'error': 'No input provided'}), 400
+        if not workout_input:
+            return jsonify({'success': False, 'error': 'No workout input provided'})
         
         # Parse with Gemini
-        logger.info(f"Processing input: {user_input}")
-        parsed_data = parser.parse_workout(user_input)
+        parsed_workout = parse_workout_with_gemini(workout_input)
         
-        # Log to database
-        workout_ids = db_logger.log_workout_entries(parsed_data['entries'])
+        # Log to Supabase
+        log_to_supabase(parsed_workout, workout_input)
         
-        return jsonify({
-            'success': True,
-            'entries_logged': len(parsed_data['entries']),
-            'workout_ids': workout_ids,
-            'message': f'Successfully logged {len(parsed_data["entries"])} workout entries'
-        })
+        return jsonify({'success': True, 'message': 'Workout logged successfully'})
         
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        return jsonify({'error': f'Parsing error: {str(e)}'}), 400
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
-
-@app.route('/health')
-def health():
-    """Health check"""
-    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+        print(f"Error in /log endpoint: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
