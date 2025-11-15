@@ -1,283 +1,80 @@
+
 import os
-import re
 import json
-import sys
 import logging
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify
+from typing import Dict, List, Any, Optional
+import re
+
+from flask import Flask, request, jsonify, render_template_string
 import google.generativeai as genai
 from supabase import create_client, Client
-from dotenv import load_dotenv
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.StreamHandler(sys.stderr)
-    ]
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 app = Flask(__name__)
 
-# 🚀 LATEST GEMINI MODELS - Try newest first!
-GEMINI_MODEL_NAMES = [
-    'gemini-2.5-flash',          # 🔥 NEWEST & MOST CAPABLE (2024)
-    'gemini-2.0-flash',          # 🚀 Very new (December 2024)  
-    'gemini-2.0-flash-001',      # 🚀 Specific version
-    'gemini-1.5-flash',          # Backup option
-    'gemini-1.5-pro',            # Fallback
-    'gemini-pro',                # Last resort
-]
+# Configuration
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+SUPABASE_URL = os.environ.get('SUPABASE_URL') 
+SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY')
 
-def find_best_gemini_model(api_key):
-    """Try the latest Gemini models first, working down to older ones"""
-    genai.configure(api_key=api_key)
-    
-    logger.info("🔍 Searching for the BEST available Gemini model...")
-    
-    # First, show all available models
-    try:
-        models = genai.list_models()
-        available_models = [model.name for model in models]
-        logger.info(f"📋 Found {len(available_models)} total models available")
-        
-        # Show Gemini models specifically
-        gemini_models = [m for m in available_models if 'gemini' in m.lower()]
-        logger.info(f"🤖 Available Gemini models: {gemini_models}")
-        
-    except Exception as e:
-        logger.warning(f"⚠️ Could not list models: {e}")
-        available_models = []
-    
-    # Try each model in order of preference (newest first)
-    for model_name in GEMINI_MODEL_NAMES:
-        try:
-            logger.info(f"🧪 Testing model: {model_name}")
-            model = genai.GenerativeModel(model_name)
-            
-            # Test with a simple prompt
-            response = model.generate_content("Say 'Hello from " + model_name + "'")
-            if response and response.text:
-                logger.info(f"🎉 SUCCESS! Using model: {model_name}")
-                logger.info(f"📝 Test response: {response.text.strip()}")
-                return model, model_name
-                
-        except Exception as e:
-            logger.warning(f"❌ Model {model_name} failed: {str(e)[:100]}...")
-            continue
-    
-    # If nothing works, return None
-    logger.error("💥 No working Gemini model found!")
-    return None, None
+# Initialize services
+if not all([GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY]):
+    logger.error("Missing required environment variables")
+    exit(1)
 
-def test_supabase_connection(supabase_client):
-    """Test Supabase connection and schema with updated column names"""
-    try:
-        logger.info("🧪 Testing Supabase connection and schema...")
-        
-        # Test 1: Basic connection
-        logger.info("🔗 Testing basic connection...")
-        test_result = supabase_client.table('activity_logs').select('id').limit(1).execute()
-        logger.info("✅ Basic connection successful")
-        
-        # Test 2: Check if we can see the schema
-        logger.info("🔍 Testing schema access...")
-        schema_test = supabase_client.table('activity_logs').select('*').limit(1).execute()
-        if schema_test.data:
-            logger.info(f"✅ Schema test successful - found {len(schema_test.data)} records")
-            logger.info(f"📋 Sample record keys: {list(schema_test.data[0].keys()) if schema_test.data else 'No data'}")
-        else:
-            logger.info("ℹ️ Schema test successful but no data found")
-        
-        # Test 3: Try a simple insert to check permissions with new column names
-        logger.info("🧪 Testing insert permissions with updated schema...")
-        test_data = {
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'activity_name': 'connection_test',  # Updated column name
-            'activity_type': 'exercise',  # New activity type column (only exercise or measurement)
-            'set_number': 1,
-            'metric_type': 'test',
-            'value': 1,
-            'unit': 'test',
-            'user_id': 'test_user',
-            'username': 'Test User',
-            'raw_input': 'Connection test',
-            'notes': 'Test connection note'  # New notes column
-        }
-        
-        # Try the insert
-        insert_result = supabase_client.table('activity_logs').insert(test_data).execute()
-        
-        # If successful, delete the test record
-        if insert_result.data:
-            test_id = insert_result.data[0]['id']
-            supabase_client.table('activity_logs').delete().eq('id', test_id).execute()
-            logger.info("✅ Insert/delete permissions successful with new schema")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Supabase test failed: {e}")
-        logger.error(f"🔍 Error details: {type(e).__name__}: {str(e)}")
-        return False
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-def initialize_apis():
-    """Initialize Gemini and Supabase clients with latest models"""
-    try:
-        logger.info("🔑 Starting API initialization...")
-        
-        # Check environment variables
-        required_vars = {
-            'GOOGLE_API_KEY': os.getenv('GOOGLE_API_KEY'),
-            'SUPABASE_URL': os.getenv('SUPABASE_URL'), 
-            'SUPABASE_ANON_KEY': os.getenv('SUPABASE_ANON_KEY')
-        }
-        
-        # Log what we found
-        for var_name, var_value in required_vars.items():
-            if var_value:
-                logger.info(f"✅ {var_name}: Found (length: {len(var_value)})")
-            else:
-                logger.error(f"❌ {var_name}: MISSING!")
-        
-        # Check if any are missing
-        missing_vars = [name for name, value in required_vars.items() if not value]
-        if missing_vars:
-            raise ValueError(f"Missing environment variables: {', '.join(missing_vars)}")
-        
-        # Find the best Gemini model
-        logger.info("🤖 Finding the BEST Gemini model...")
-        gemini_model, model_name = find_best_gemini_model(required_vars['GOOGLE_API_KEY'])
-        
-        if not gemini_model:
-            raise ValueError("No working Gemini model found")
-        
-        logger.info(f"✅ Gemini initialized successfully with: {model_name}")
-        
-        # Initialize Supabase
-        logger.info("🗄️ Initializing Supabase...")
-        try:
-            supabase = create_client(
-                required_vars['SUPABASE_URL'], 
-                required_vars['SUPABASE_ANON_KEY']
-            )
-            
-            # Test Supabase connection thoroughly
-            connection_ok = test_supabase_connection(supabase)
-            if not connection_ok:
-                raise ValueError("Supabase connection test failed")
-            
-            logger.info("✅ Supabase initialized and tested successfully")
-            
-        except Exception as e:
-            logger.error(f"❌ Supabase initialization failed: {e}")
-            raise ValueError(f"Supabase initialization failed: {e}")
-        
-        return gemini_model, supabase, model_name
-        
-    except Exception as e:
-        logger.error(f"❌ CRITICAL: API initialization failed: {e}")
-        return None, None, None
-
-# Try to initialize APIs
-logger.info("🚀 Starting API initialization...")
-gemini_model, supabase, working_model_name = initialize_apis()
-
-# Log final status
-if gemini_model and supabase:
-    logger.info(f"🎉 ALL SYSTEMS GO! Using: {working_model_name}")
-else:
-    logger.error("💥 SYSTEM INITIALIZATION FAILED")
-
-class WorkoutLogger:
-    """Advanced workout logger with improved notes handling and simplified activity types"""
+class WorkoutParser:
+    """Simple, clean workout parser that trusts Gemini's natural abilities"""
     
-    def __init__(self, gemini_model, supabase_client):
-        if not gemini_model or not supabase_client:
-            raise ValueError("Cannot initialize WorkoutLogger: APIs not available")
-        self.gemini_model = gemini_model
-        self.supabase = supabase_client
-        logger.info("💪 WorkoutLogger initialized successfully")
+    def __init__(self):
+        self.model = model
     
-    def determine_activity_type(self, activity_name: str) -> str:
-        """Determine if an activity is exercise or measurement (NO CARDIO CATEGORY)"""
-        activity_lower = activity_name.lower()
+    def parse_workout(self, user_input: str, user_id: str = "default_user") -> Dict[str, Any]:
+        """Parse workout input using Gemini - clean and simple"""
+        current_date = datetime.now().strftime('%Y-%m-%d')
         
-        # Body measurements - these are the ONLY things that get 'measurement' type
-        measurement_keywords = [
-            'weight', 'body weight', 'bodyweight', 'body fat', 'bodyfat', 'body mass',
-            'height', 'waist', 'chest', 'arm', 'leg', 'neck', 'hip', 'measurement',
-            'body composition', 'bmi', 'muscle mass', 'fat percentage', 'circumference'
-        ]
-        
-        # Check for measurements
-        if any(keyword in activity_lower for keyword in measurement_keywords):
-            return 'measurement'
-        
-        # EVERYTHING ELSE is 'exercise' - running, cycling, pull-ups, squats, etc.
-        return 'exercise'
-    
-    def generate_gemini_prompt(self, user_input: str, current_date: str, user_id: str = "default_user") -> str:
-        """Enhanced prompt with better notes handling and simplified activity types"""
-        return f"""
+        # CLEAN prompt - no micromanagement, just clear requirements
+        prompt = f"""
 Today's date is {current_date}.
-You are an advanced fitness tracking AI. Convert the following workout description into structured JSON.
+Convert this workout description into structured JSON.
 
-CRITICAL INSTRUCTIONS FOR NOTES:
-- Notes should be associated with the SPECIFIC exercise they relate to
-- If notes mention a specific exercise, attach them ONLY to that exercise
-- If notes are general (like "good workout"), attach to the first exercise only
-- If no specific exercise is mentioned, attach to the exercise immediately before the note
-
-INSTRUCTIONS:
-- Extract the date from input if specified (e.g., 'today', 'yesterday', specific dates)
-- Use today's date if no date is specified
-- Return ONLY valid JSON, no additional text or explanations
-- Use consistent activity names (e.g., "pull-up" not "pullup", "push-up" not "pushup")
-- Be smart about exercise variations (e.g., "chin-ups" vs "pull-ups")
-- ALL TIME VALUES must be in SECONDS (convert minutes to seconds: 5 min = 300 sec)
-- Activity types: ONLY 'exercise' or 'measurement' (NO CARDIO - running/cycling = exercise)
+REQUIREMENTS:
+1. If multiple dates mentioned, create separate entries for each
+2. ALWAYS return {{"entries": [...]}} format - never a raw array
+3. Convert time formats (45:18 becomes 2718 seconds)
+4. Use standard exercise names
 
 INPUT: "{user_input}"
 
-OUTPUT FORMAT (JSON only):
+OUTPUT:
 {{
-  "date": "YYYY-MM-DD",
-  "user_id": "{user_id}",
-  "username": "User",
-  "raw_input": "{user_input}",
-  "exercises": [
+  "entries": [
     {{
-      "name": "Activity Name",
-      "activity_type": "exercise",
-      "notes": "notes specific to THIS exercise only, or null",
-      "sets": [
+      "date": "YYYY-MM-DD",
+      "user_id": "{user_id}",
+      "username": "User",
+      "raw_input": "relevant portion",
+      "exercises": [
         {{
-          "set_number": 1,
-          "metrics": [
+          "name": "exercise name",
+          "activity_type": "exercise",
+          "notes": "any notes or null",
+          "sets": [
             {{
-              "type": "reps",
-              "value": 10,
-              "unit": "reps"
-            }},
-            {{
-              "type": "weight",
-              "value": 20.5,
-              "unit": "kg"
-            }},
-            {{
-              "type": "time",
-              "value": 300,
-              "unit": "sec"
-            }},
-            {{
-              "type": "distance",
-              "value": 5.0,
-              "unit": "km"
+              "set_number": 1,
+              "metrics": [
+                {{"type": "reps", "value": 10, "unit": "reps"}},
+                {{"type": "weight", "value": 50, "unit": "kg"}},
+                {{"type": "time", "value": 300, "unit": "sec"}},
+                {{"type": "distance", "value": 5, "unit": "km"}}
+              ]
             }}
           ]
         }}
@@ -285,558 +82,293 @@ OUTPUT FORMAT (JSON only):
     }}
   ]
 }}
-
-EXAMPLES OF PROPER NOTE HANDLING:
-- "5 pull ups, shoulder pain. 5 deadlifts 50kg" 
-  → pull-ups: notes="shoulder pain", deadlifts: notes=null
-  
-- "bench press 80kg 5 reps, easy set. squats 100kg 3 reps"
-  → bench press: notes="easy set", squats: notes=null
-  
-- "ran 5km in 25 minutes, felt tired. 10 push ups"
-  → running: notes="felt tired", push-ups: notes=null
-  
-- "weighed myself, 75kg. did 10 push ups, good form"
-  → body weight: notes=null, push-ups: notes="good form"
-
-ACTIVITY TYPE EXAMPLES (SIMPLIFIED):
-- "pull-ups", "bench press", "squats", "running", "cycling" → "exercise"
-- "body weight", "waist measurement", "body fat" → "measurement"
 """
-    
-    def validate_and_fix_parsed_data(self, parsed_data: dict) -> dict:
-        """Validate and fix common issues with parsed data from Gemini"""
+        
         try:
-            # Ensure we have the basic structure
+            response = self.model.generate_content(prompt)
+            response_text = response.text.strip()
+            
+            # Clean up response
+            if '```json' in response_text:
+                response_text = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL).group(1)
+            elif '```' in response_text:
+                response_text = re.search(r'```(.*?)```', response_text, re.DOTALL).group(1)
+            
+            parsed_data = json.loads(response_text)
+            
+            # Validate structure
             if not isinstance(parsed_data, dict):
-                logger.error(f"❌ Parsed data is not a dict: {type(parsed_data)}")
                 raise ValueError(f"Expected dict, got {type(parsed_data)}")
             
-            # Ensure exercises is a list
-            if 'exercises' not in parsed_data:
-                parsed_data['exercises'] = []
-            elif not isinstance(parsed_data['exercises'], list):
-                logger.warning(f"⚠️ 'exercises' is not a list: {type(parsed_data['exercises'])}")
-                # Try to convert to list if it's a single exercise
-                if isinstance(parsed_data['exercises'], dict):
-                    parsed_data['exercises'] = [parsed_data['exercises']]
-                else:
-                    parsed_data['exercises'] = []
+            if "entries" not in parsed_data:
+                raise ValueError("Response missing 'entries' key")
             
-            # Validate each exercise
-            valid_exercises = []
-            for i, exercise in enumerate(parsed_data.get('exercises', [])):
-                try:
-                    if not isinstance(exercise, dict):
-                        logger.warning(f"⚠️ Exercise {i} is not a dict: {type(exercise)}")
-                        continue
-                    
-                    # Ensure required fields
-                    if 'name' not in exercise:
-                        exercise['name'] = f"Unknown Exercise {i+1}"
-                    
-                    if 'activity_type' not in exercise or not exercise['activity_type']:
-                        exercise['activity_type'] = self.determine_activity_type(exercise.get('name', ''))
-                    
-                    # Ensure sets is a list
-                    if 'sets' not in exercise:
-                        exercise['sets'] = []
-                    elif not isinstance(exercise['sets'], list):
-                        if isinstance(exercise['sets'], dict):
-                            exercise['sets'] = [exercise['sets']]
-                        else:
-                            exercise['sets'] = []
-                    
-                    # Validate each set
-                    valid_sets = []
-                    for j, set_data in enumerate(exercise.get('sets', [])):
-                        try:
-                            if not isinstance(set_data, dict):
-                                logger.warning(f"⚠️ Set {j} in exercise {i} is not a dict: {type(set_data)}")
-                                continue
-                            
-                            # Ensure set_number
-                            if 'set_number' not in set_data:
-                                set_data['set_number'] = j + 1
-                            
-                            # Ensure metrics is a list
-                            if 'metrics' not in set_data:
-                                set_data['metrics'] = []
-                            elif not isinstance(set_data['metrics'], list):
-                                if isinstance(set_data['metrics'], dict):
-                                    set_data['metrics'] = [set_data['metrics']]
-                                else:
-                                    set_data['metrics'] = []
-                            
-                            # Validate each metric
-                            valid_metrics = []
-                            for k, metric in enumerate(set_data.get('metrics', [])):
-                                try:
-                                    if not isinstance(metric, dict):
-                                        logger.warning(f"⚠️ Metric {k} is not a dict: {type(metric)}")
-                                        continue
-                                    
-                                    # Ensure required metric fields
-                                    if 'type' not in metric or 'value' not in metric:
-                                        logger.warning(f"⚠️ Metric {k} missing type or value")
-                                        continue
-                                    
-                                    if metric.get('value') is not None:
-                                        valid_metrics.append(metric)
-                                
-                                except Exception as metric_error:
-                                    logger.error(f"❌ Error validating metric {k}: {metric_error}")
-                                    continue
-                            
-                            set_data['metrics'] = valid_metrics
-                            if valid_metrics:  # Only add sets that have valid metrics
-                                valid_sets.append(set_data)
-                        
-                        except Exception as set_error:
-                            logger.error(f"❌ Error validating set {j}: {set_error}")
-                            continue
-                    
-                    exercise['sets'] = valid_sets
-                    if valid_sets:  # Only add exercises that have valid sets
-                        valid_exercises.append(exercise)
-                
-                except Exception as exercise_error:
-                    logger.error(f"❌ Error validating exercise {i}: {exercise_error}")
-                    continue
+            if not isinstance(parsed_data["entries"], list):
+                raise ValueError("'entries' must be an array")
             
-            parsed_data['exercises'] = valid_exercises
-            
-            # Ensure other required fields
-            if 'date' not in parsed_data:
-                parsed_data['date'] = datetime.now().strftime('%Y-%m-%d')
-            if 'user_id' not in parsed_data:
-                parsed_data['user_id'] = "default_user"
-            if 'username' not in parsed_data:
-                parsed_data['username'] = "User"
-            if 'raw_input' not in parsed_data:
-                parsed_data['raw_input'] = ""
-            
-            logger.info(f"✅ Validated data: {len(valid_exercises)} exercises")
+            logger.info(f"✅ Successfully parsed {len(parsed_data['entries'])} entries")
             return parsed_data
-        
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {e}")
+            logger.error(f"Raw response: {response_text}")
+            raise ValueError(f"Invalid JSON from Gemini: {e}")
         except Exception as e:
-            logger.error(f"❌ Error validating parsed data: {e}")
-            logger.error(f"🔍 Raw data type: {type(parsed_data)}")
-            logger.error(f"🔍 Raw data: {str(parsed_data)[:200]}...")
+            logger.error(f"Parsing error: {e}")
             raise
-    
-    def parse_input(self, user_input: str, current_date: str = None, user_id: str = "default_user") -> dict:
-        """Parse user input using latest Gemini model with improved error handling"""
-        if current_date is None:
-            current_date = datetime.now().strftime('%Y-%m-%d')
-        
-        try:
-            logger.info(f"🤖 Parsing with {working_model_name}: '{user_input}'")
-            prompt = self.generate_gemini_prompt(user_input, current_date, user_id)
-            response = self.gemini_model.generate_content(prompt)
-            response_text = response.text
-            
-            logger.info(f"📝 Raw Gemini response: {response_text[:300]}...")
-            
-            # Extract JSON from response
-            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
-            if json_match:
-                json_string = json_match.group(1).strip()
-                logger.info("✅ Found JSON block in response")
-            else:
-                json_string = response_text.strip()
-                logger.info("⚠️ No JSON block found, using raw response")
-            
-            logger.info(f"🔍 Attempting to parse JSON: {json_string[:200]}...")
-            
-            try:
-                parsed_data = json.loads(json_string)
-                logger.info(f"✅ Successfully parsed JSON: {type(parsed_data)}")
-            except json.JSONDecodeError as json_error:
-                logger.error(f"❌ JSON decode error: {json_error}")
-                logger.error(f"🔍 Problematic JSON: {json_string}")
-                raise ValueError(f"Invalid JSON from Gemini: {json_error}")
-            
-            # Validate and fix the parsed data
-            validated_data = self.validate_and_fix_parsed_data(parsed_data)
-            
-            # Log notes for debugging
-            for exercise in validated_data.get('exercises', []):
-                if exercise.get('notes'):
-                    logger.info(f"📝 Notes for {exercise['name']}: '{exercise['notes']}'")
-            
-            return validated_data
-            
-        except Exception as e:
-            logger.error(f"❌ Error parsing input: {e}")
-            logger.error(f"🔍 Error type: {type(e).__name__}")
-            if 'response_text' in locals():
-                logger.error(f"🔍 Raw response: {response_text[:200]}...")
-            raise
-    
-    def log_workout(self, workout_data: dict) -> bool:
-        """Log workout data to database with improved schema"""
-        try:
-            logger.info(f"📝 Logging workout data")
-            
-            log_date = workout_data.get("date", datetime.now().strftime('%Y-%m-%d'))
-            user_id = workout_data.get("user_id", "default_user")
-            username = workout_data.get("username", "User")
-            raw_input = workout_data.get("raw_input", "")
-            
-            # Prepare all rows for batch insert
-            rows_to_insert = []
-            
-            for exercise in workout_data.get("exercises", []):
-                activity_name = exercise.get("name", "Unknown Activity")
-                activity_type = exercise.get("activity_type", "exercise")
-                exercise_notes = exercise.get("notes")  # Notes specific to this exercise
-                
-                for set_data in exercise.get("sets", []):
-                    set_number = set_data.get("set_number", 1)
-                    
-                    # Each metric becomes one row
-                    for metric in set_data.get("metrics", []):
-                        if metric.get("value") is not None:
-                            row_data = {
-                                'date': log_date,
-                                'activity_name': activity_name,
-                                'activity_type': activity_type,  # Only 'exercise' or 'measurement'
-                                'set_number': set_number,
-                                'metric_type': metric.get("type"),
-                                'value': float(metric.get("value")),
-                                'unit': metric.get("unit"),
-                                'user_id': user_id,
-                                'username': username,
-                                'raw_input': raw_input,
-                                'notes': exercise_notes  # Exercise-specific notes
-                            }
-                            rows_to_insert.append(row_data)
-            
-            if not rows_to_insert:
-                logger.warning("⚠️ No workout data to insert")
-                return False
-            
-            logger.info(f"📊 Preparing to insert {len(rows_to_insert)} records")
-            logger.info(f"🔍 Sample record: {rows_to_insert[0]}")
-            
-            # Single batch insert with better error handling
-            try:
-                result = self.supabase.table('activity_logs').insert(rows_to_insert).execute()
-                
-                if result.data:
-                    logger.info(f"✅ Successfully inserted {len(result.data)} workout records")
-                    
-                    # Log summary of what was inserted
-                    activities_logged = {}
-                    for row in rows_to_insert:
-                        activity = row['activity_name']
-                        activity_type = row['activity_type']
-                        notes = row['notes']
-                        key = f"{activity} ({activity_type})"
-                        if key not in activities_logged:
-                            activities_logged[key] = {'count': 0, 'notes': notes}
-                        activities_logged[key]['count'] += 1
-                    
-                    logger.info("📋 Activities logged:")
-                    for activity, info in activities_logged.items():
-                        notes_str = f" - Notes: {info['notes']}" if info['notes'] else ""
-                        logger.info(f"   • {activity}: {info['count']} records{notes_str}")
-                    
-                    return True
-                else:
-                    logger.error("❌ Insert returned no data")
-                    return False
-                    
-            except Exception as insert_error:
-                logger.error(f"❌ Database insert error: {insert_error}")
-                logger.error(f"🔍 Error type: {type(insert_error).__name__}")
-                
-                # Try to get more details about the error
-                if hasattr(insert_error, 'details'):
-                    logger.error(f"🔍 Error details: {insert_error.details}")
-                
-                # If it's a schema error, try to diagnose
-                if 'schema' in str(insert_error).lower() or 'column' in str(insert_error).lower():
-                    logger.error("🚨 This looks like a schema/column issue!")
-                    logger.error("💡 Possible solutions:")
-                    logger.error("   1. Run the database migration script first")
-                    logger.error("   2. Check if 'activity_name', 'activity_type', and 'notes' columns exist")
-                    logger.error("   3. Verify RLS (Row Level Security) policies")
-                
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Error in log_workout: {e}")
-            logger.error(f"🔍 Error type: {type(e).__name__}")
-            return False
-    
-    def delete_latest_exercise(self, user_id: str = "default_user") -> bool:
-        """Delete the most recent exercise entry"""
-        try:
-            # Get the latest exercise entry
-            result = self.supabase.table('activity_logs')\
-                .select('date, activity_name')\
-                .eq('user_id', user_id)\
-                .order('created_at', desc=True)\
-                .limit(1)\
-                .execute()
-            
-            if result.data:
-                latest = result.data[0]
-                # Delete all entries for this activity on this date
-                self.supabase.table('activity_logs')\
-                    .delete()\
-                    .eq('user_id', user_id)\
-                    .eq('date', latest['date'])\
-                    .eq('activity_name', latest['activity_name'])\
-                    .execute()
-                
-                logger.info(f"✅ Deleted latest activity: {latest['activity_name']}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"❌ Error deleting activity: {e}")
-            return False
-    
-    def get_recent_workouts(self, days: int = 7, user_id: str = "default_user", activity_type: str = None) -> list:
-        """Get recent workout data, optionally filtered by activity type"""
-        try:
-            cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-            
-            query = self.supabase.table('activity_logs')\
-                .select('*')\
-                .eq('user_id', user_id)\
-                .gte('date', cutoff_date)
-            
-            # Add activity type filter if specified
-            if activity_type:
-                query = query.eq('activity_type', activity_type)
-            
-            result = query.order('created_at', desc=True).limit(50).execute()
-            
-            logger.info(f"📊 Retrieved {len(result.data)} recent workout records")
-            if activity_type:
-                logger.info(f"🎯 Filtered by activity type: {activity_type}")
-            
-            return result.data
-        except Exception as e:
-            logger.error(f"❌ Error getting workouts: {e}")
-            return []
 
-# Initialize workout logger only if APIs are available
-workout_logger = None
-if gemini_model and supabase:
-    try:
-        workout_logger = WorkoutLogger(gemini_model, supabase)
-        logger.info("💪 WorkoutLogger created successfully")
-    except Exception as e:
-        logger.error(f"❌ Failed to create WorkoutLogger: {e}")
+class DatabaseLogger:
+    """Simple database operations"""
+    
+    def __init__(self):
+        self.supabase = supabase
+    
+    def log_workout_entries(self, entries: List[Dict[str, Any]]) -> List[str]:
+        """Log multiple workout entries to database"""
+        workout_ids = []
+        
+        for entry in entries:
+            try:
+                # Insert workout
+                workout_data = {
+                    'date': entry['date'],
+                    'user_id': entry['user_id'],
+                    'username': entry['username'],
+                    'raw_input': entry['raw_input']
+                }
+                
+                workout_result = self.supabase.table('workouts').insert(workout_data).execute()
+                workout_id = workout_result.data[0]['id']
+                workout_ids.append(workout_id)
+                
+                # Insert exercises
+                for exercise in entry.get('exercises', []):
+                    exercise_data = {
+                        'workout_id': workout_id,
+                        'name': exercise['name'],
+                        'activity_type': exercise.get('activity_type', 'exercise'),
+                        'notes': exercise.get('notes')
+                    }
+                    
+                    exercise_result = self.supabase.table('exercises').insert(exercise_data).execute()
+                    exercise_id = exercise_result.data[0]['id']
+                    
+                    # Insert sets and metrics
+                    for set_data in exercise.get('sets', []):
+                        set_info = {
+                            'exercise_id': exercise_id,
+                            'set_number': set_data['set_number']
+                        }
+                        
+                        set_result = self.supabase.table('exercise_sets').insert(set_info).execute()
+                        set_id = set_result.data[0]['id']
+                        
+                        # Insert metrics
+                        for metric in set_data.get('metrics', []):
+                            if metric['value'] is not None:
+                                metric_data = {
+                                    'set_id': set_id,
+                                    'metric_type': metric['type'],
+                                    'value': metric['value'],
+                                    'unit': metric['unit']
+                                }
+                                self.supabase.table('exercise_metrics').insert(metric_data).execute()
+                
+                logger.info(f"✅ Logged workout entry for {entry['date']}")
+                
+            except Exception as e:
+                logger.error(f"Database error for entry {entry.get('date', 'unknown')}: {e}")
+                raise
+        
+        return workout_ids
+
+# Initialize components
+parser = WorkoutParser()
+db_logger = DatabaseLogger()
+
+# Simple HTML template
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Workout Logger</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 600px; 
+            margin: 50px auto; 
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; text-align: center; }
+        textarea { 
+            width: 100%; 
+            height: 120px; 
+            padding: 15px; 
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            resize: vertical;
+        }
+        button { 
+            width: 100%; 
+            padding: 15px; 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+        button:hover { background: #0056b3; }
+        .result { 
+            margin-top: 20px; 
+            padding: 15px; 
+            border-radius: 5px; 
+            display: none;
+        }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .examples {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 5px;
+        }
+        .examples h3 { margin-top: 0; color: #495057; }
+        .examples ul { margin: 10px 0; }
+        .examples li { margin: 5px 0; color: #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏋️ Simple Workout Logger</h1>
+        
+        <form id="workoutForm">
+            <textarea 
+                id="workoutInput" 
+                placeholder="Describe your workout in natural language...
+
+Examples:
+• 5 pull-ups, 10 push-ups
+• yesterday: ran 5k in 25 minutes  
+• bodyweight 75kg, then 3x8 squats at 60kg
+• a week ago: did some pullups and felt good"
+                required
+            ></textarea>
+            <button type="submit">Log Workout</button>
+        </form>
+        
+        <div id="result" class="result"></div>
+        
+        <div class="examples">
+            <h3>💡 Tips</h3>
+            <ul>
+                <li>Use natural language - the AI understands typos and variations</li>
+                <li>Mention dates like "yesterday", "last week", or specific dates</li>
+                <li>Include details like weight, reps, time, distance</li>
+                <li>Multiple exercises in one input work fine</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('workoutForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const input = document.getElementById('workoutInput').value;
+            const result = document.getElementById('result');
+            const button = document.querySelector('button');
+            
+            // Show loading
+            button.textContent = 'Logging...';
+            button.disabled = true;
+            result.style.display = 'none';
+            
+            try {
+                const response = await fetch('/log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ input: input })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    result.className = 'result success';
+                    result.innerHTML = `
+                        <strong>✅ Success!</strong><br>
+                        Logged ${data.entries_logged} workout entries<br>
+                        <small>Workout IDs: ${data.workout_ids.join(', ')}</small>
+                    `;
+                    document.getElementById('workoutInput').value = '';
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+                
+            } catch (error) {
+                result.className = 'result error';
+                result.innerHTML = `<strong>❌ Error:</strong> ${error.message}`;
+            }
+            
+            result.style.display = 'block';
+            button.textContent = 'Log Workout';
+            button.disabled = false;
+        });
+    </script>
+</body>
+</html>
+"""
 
 @app.route('/')
 def index():
-    """Main page with input form and recent workouts"""
-    recent_workouts = []
-    if workout_logger:
-        recent_workouts = workout_logger.get_recent_workouts()
-    
-    return render_template('index.html', recent_workouts=recent_workouts)
+    """Simple workout logging interface"""
+    return render_template_string(HTML_TEMPLATE)
 
 @app.route('/log', methods=['POST'])
 def log_workout():
-    """Handle workout logging with improved error handling"""
-    if not workout_logger:
-        logger.error("❌ Workout logger not available - system not initialized")
-        return jsonify({
-            'success': False, 
-            'error': 'System not initialized. Check server logs for API initialization errors.'
-        })
-    
+    """Log workout endpoint - clean and simple"""
     try:
-        user_input = request.json.get('input', '').strip()
+        data = request.get_json()
+        user_input = data.get('input', '').strip()
+        
         if not user_input:
-            return jsonify({'success': False, 'error': 'No input provided'})
+            return jsonify({'error': 'No input provided'}), 400
         
-        logger.info(f"🎯 Processing input: '{user_input}'")
+        # Parse with Gemini
+        logger.info(f"Processing input: {user_input}")
+        parsed_data = parser.parse_workout(user_input)
         
-        # Check if this is an edit command
-        edit_keywords = ['delete', 'remove', 'edit', 'undo', 'clear']
-        is_edit = any(keyword in user_input.lower() for keyword in edit_keywords)
+        # Log to database
+        workout_ids = db_logger.log_workout_entries(parsed_data['entries'])
         
-        if is_edit:
-            if 'latest' in user_input.lower() or 'last' in user_input.lower():
-                success = workout_logger.delete_latest_exercise()
-                if success:
-                    return jsonify({'success': True, 'message': 'Latest activity deleted successfully!'})
-                else:
-                    return jsonify({'success': False, 'error': 'No activity found to delete'})
-            else:
-                return jsonify({'success': False, 'error': 'Edit command not recognized'})
-        else:
-            # Handle workout logging
-            try:
-                parsed_data = workout_logger.parse_input(user_input)
-                logger.info(f"✅ Successfully parsed input")
-                
-                success = workout_logger.log_workout(parsed_data)
-                
-                if success:
-                    # Create detailed success message
-                    activities = []
-                    for exercise in parsed_data.get('exercises', []):
-                        activity_name = exercise.get('name', 'Unknown')
-                        activity_type = exercise.get('activity_type', 'exercise')
-                        notes = exercise.get('notes')
-                        
-                        activity_str = f"{activity_name} ({activity_type})"
-                        if notes:
-                            activity_str += f" - {notes}"
-                        activities.append(activity_str)
-                    
-                    activities_msg = "; ".join(activities)
-                    return jsonify({
-                        'success': True, 
-                        'message': f'Logged: {activities_msg}',
-                        'model': working_model_name
-                    })
-                else:
-                    return jsonify({'success': False, 'error': 'Failed to log workout - check server logs for details'})
-            
-            except Exception as parse_error:
-                logger.error(f"❌ Parsing error: {parse_error}")
-                logger.error(f"🔍 Error type: {type(parse_error).__name__}")
-                return jsonify({
-                    'success': False, 
-                    'error': f'Failed to parse input: {str(parse_error)[:100]}...'
-                })
-    
+        return jsonify({
+            'success': True,
+            'entries_logged': len(parsed_data['entries']),
+            'workout_ids': workout_ids,
+            'message': f'Successfully logged {len(parsed_data["entries"])} workout entries'
+        })
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        return jsonify({'error': f'Parsing error: {str(e)}'}), 400
     except Exception as e:
-        logger.error(f"❌ Exception in log_workout: {e}")
-        logger.error(f"🔍 Error type: {type(e).__name__}")
-        return jsonify({'success': False, 'error': f'Error: {str(e)}'})
-
-@app.route('/workouts')
-def get_workouts():
-    """API endpoint to get recent workouts"""
-    if not workout_logger:
-        return jsonify([])
-    
-    # Get optional activity type filter
-    activity_type = request.args.get('type')
-    workouts = workout_logger.get_recent_workouts(activity_type=activity_type)
-    return jsonify(workouts)
+        logger.error(f"Unexpected error: {e}")
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 @app.route('/health')
 def health():
-    """Health check endpoint with model info"""
-    env_vars = {
-        'GOOGLE_API_KEY': '✅ Set' if os.getenv('GOOGLE_API_KEY') else '❌ Missing',
-        'SUPABASE_URL': '✅ Set' if os.getenv('SUPABASE_URL') else '❌ Missing',
-        'SUPABASE_ANON_KEY': '✅ Set' if os.getenv('SUPABASE_ANON_KEY') else '❌ Missing'
-    }
-    
-    return jsonify({
-        'status': 'healthy' if workout_logger else 'degraded',
-        'gemini_initialized': gemini_model is not None,
-        'supabase_initialized': supabase is not None,
-        'workout_logger_initialized': workout_logger is not None,
-        'active_model': working_model_name if working_model_name else 'None',
-        'model_preference_order': GEMINI_MODEL_NAMES,
-        'environment_variables': env_vars,
-        'schema_version': '2.2 - activity_name, activity_type (exercise/measurement only), notes_per_exercise',
-        'features': [
-            'Exercise-specific notes handling',
-            'Simplified activity types: exercise OR measurement only',
-            'Latest Gemini 2.5 Flash support',
-            'Improved error handling and data validation',
-            'Fixed list object attribute errors'
-        ],
-        'activity_types': ['exercise', 'measurement'],  # Only these two
-        'timestamp': datetime.now().isoformat()
-    })
-
-@app.route('/models')
-def list_models():
-    """List all available Gemini models"""
-    try:
-        if not os.getenv('GOOGLE_API_KEY'):
-            return jsonify({'error': 'No API key available'})
-        
-        genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-        models = genai.list_models()
-        
-        all_models = []
-        gemini_models = []
-        
-        for model in models:
-            model_info = {
-                'name': model.name,
-                'display_name': getattr(model, 'display_name', 'N/A'),
-                'supported_methods': list(getattr(model, 'supported_generation_methods', []))
-            }
-            all_models.append(model_info)
-            
-            if 'gemini' in model.name.lower():
-                gemini_models.append(model_info)
-        
-        return jsonify({
-            'current_model': working_model_name,
-            'preference_order': GEMINI_MODEL_NAMES,
-            'available_gemini_models': gemini_models,
-            'total_models': len(all_models),
-            'all_models': all_models
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)})
-
-@app.route('/test-db')
-def test_database():
-    """Test database connection and permissions"""
-    if not supabase:
-        return jsonify({'error': 'Supabase not initialized'})
-    
-    try:
-        # Test connection
-        connection_ok = test_supabase_connection(supabase)
-        
-        return jsonify({
-            'connection_test': 'passed' if connection_ok else 'failed',
-            'schema_version': '2.2 - activity_name, activity_type (exercise/measurement only), notes_per_exercise',
-            'activity_types': ['exercise', 'measurement'],
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)})
-
-@app.route('/stats')
-def get_stats():
-    """Get activity statistics by type (simplified)"""
-    if not workout_logger:
-        return jsonify({'error': 'Workout logger not available'})
-    
-    try:
-        # Get data for the two activity types
-        exercises = workout_logger.get_recent_workouts(days=30, activity_type='exercise')
-        measurements = workout_logger.get_recent_workouts(days=30, activity_type='measurement')
-        
-        stats = {
-            'exercise_count': len(exercises),
-            'measurement_count': len(measurements),
-            'total_activities': len(exercises) + len(measurements),
-            'recent_exercises': exercises[:5],
-            'recent_measurements': measurements[:5],
-            'activity_types': ['exercise', 'measurement']  # Only these two
-        }
-        
-        return jsonify(stats)
-    except Exception as e:
-        return jsonify({'error': str(e)})
+    """Health check"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    logger.info(f"🌐 Starting Flask app on port {port}")
-    if working_model_name:
-        logger.info(f"🤖 Powered by: {working_model_name}")
-    logger.info("🔄 Schema version: 2.2 (activity_name, activity_type: exercise/measurement only)")
-    logger.info("✨ Features: Exercise-specific notes, Simplified activity types, Fixed list errors")
     app.run(host='0.0.0.0', port=port, debug=False)
