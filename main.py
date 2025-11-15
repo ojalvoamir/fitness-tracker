@@ -9,7 +9,7 @@ app = Flask(__name__)
 
 # Configure Gemini API
 genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('models/gemini-2.5-flash')
 
 # Configure Supabase
 supabase_url = os.getenv('SUPABASE_URL')
