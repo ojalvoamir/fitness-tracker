@@ -12,278 +12,214 @@
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f7f7f8;
+            color: #374151;
+            line-height: 1.6;
         }
         
         .container {
-            max-width: 800px;
+            max-width: 768px;
             margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 1.5rem;
             text-align: center;
         }
         
         .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #111827;
         }
         
-        .header p {
-            opacity: 0.9;
-            font-size: 1.1rem;
-        }
-        
-        /* Toggle Switch Styles */
-        .mode-selector {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 20px;
-            margin: 20px 30px;
-            border-radius: 15px;
-            text-align: center;
-        }
-        
-        .mode-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-            margin-top: 10px;
-        }
-        
-        .mode-label {
-            font-size: 14px;
-            font-weight: 500;
-            opacity: 0.8;
-            min-width: 80px;
-        }
-        
-        .toggle-switch {
-            position: relative;
-            width: 60px;
-            height: 30px;
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 15px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        
-        .toggle-switch.active {
-            background: rgba(255, 255, 255, 0.5);
-        }
-        
-        .toggle-slider {
-            position: absolute;
-            top: 3px;
-            left: 3px;
-            width: 24px;
-            height: 24px;
-            background: white;
-            border-radius: 50%;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-        
-        .toggle-switch.active .toggle-slider {
-            transform: translateX(30px);
-        }
-        
-        .mode-description {
-            font-size: 12px;
-            opacity: 0.7;
-            margin-top: 8px;
-            max-width: 400px;
-            margin-left: auto;
-            margin-right: auto;
+        .main-content {
+            flex: 1;
+            padding: 1.5rem;
         }
         
         .input-section {
-            padding: 40px;
-        }
-        
-        .input-group {
-            margin-bottom: 30px;
-        }
-        
-        .input-group label {
-            display: block;
-            margin-bottom: 10px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .input-field {
-            width: 100%;
-            padding: 15px 20px;
-            border: 2px solid #e1e5e9;
-            border-radius: 12px;
-            font-size: 16px;
-            transition: all 0.3s ease;
-            resize: vertical;
-            min-height: 60px;
-        }
-        
-        .input-field:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        .submit-btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
-        }
-        
-        .submit-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-        
-        .submit-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .message {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 8px;
-            display: none;
-        }
-        
-        .message.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .message.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .recent-workouts {
-            padding: 40px;
-            background: #f8f9fa;
-        }
-        
-        .recent-workouts h2 {
-            margin-bottom: 20px;
-            color: #333;
-        }
-        
-        .workout-item {
             background: white;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 8px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .workout-date {
-            font-weight: 600;
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-        
-        .workout-details {
-            color: #666;
+            border-radius: 0.75rem;
+            border: 1px solid #e5e7eb;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
         }
         
         .examples {
-            margin-top: 20px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
         }
         
         .examples h3 {
-            margin-bottom: 15px;
-            color: #333;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #6b7280;
+            margin-bottom: 0.5rem;
         }
         
         .examples ul {
             list-style: none;
-            padding: 0;
+            font-size: 0.875rem;
+            color: #6b7280;
         }
         
         .examples li {
-            padding: 8px 0;
-            color: #666;
-            border-bottom: 1px solid #eee;
+            margin-bottom: 0.25rem;
         }
         
-        .examples li:last-child {
-            border-bottom: none;
+        .examples li:before {
+            content: "•";
+            margin-right: 0.5rem;
+            color: #9ca3af;
+        }
+        
+        .input-form {
+            padding: 1.5rem;
+        }
+        
+        .input-wrapper {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 1rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            outline: none;
+            resize: vertical;
+            font-family: inherit;
+            font-size: 1rem;
+            line-height: 1.5;
+            transition: border-color 0.2s;
+        }
+        
+        textarea:focus {
+            border-color: #10b981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+        
+        textarea::placeholder {
+            color: #9ca3af;
+        }
+        
+        .submit-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        
+        .submit-button:hover:not(:disabled) {
+            background: #059669;
+        }
+        
+        .submit-button:disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+        }
+        
+        .message {
+            margin: 1rem 0;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .message.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+        
+        .message.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
         }
         
         .loading {
             display: none;
             text-align: center;
-            margin-top: 20px;
+            color: #6b7280;
+            font-size: 0.875rem;
+            padding: 1rem;
         }
         
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
+        .recent-workouts {
+            background: white;
+            border-radius: 0.75rem;
+            border: 1px solid #e5e7eb;
+            overflow: hidden;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .recent-workouts h2 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #111827;
+            padding: 1.5rem 1.5rem 1rem;
         }
         
-        @media (max-width: 768px) {
+        .workout-item {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .workout-item:last-child {
+            border-bottom: none;
+        }
+        
+        .workout-header {
+            font-weight: 500;
+            color: #111827;
+            margin-bottom: 0.25rem;
+        }
+        
+        .workout-details {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+        
+        .workout-original {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            margin-top: 0.25rem;
+            font-style: italic;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1.5rem;
+            color: #6b7280;
+        }
+        
+        @media (max-width: 640px) {
             .container {
-                margin: 10px;
-                border-radius: 15px;
+                margin: 0;
+            }
+            
+            .main-content {
+                padding: 1rem;
             }
             
             .header {
-                padding: 20px;
-            }
-            
-            .header h1 {
-                font-size: 2rem;
-            }
-            
-            .input-section, .recent-workouts {
-                padding: 20px;
-            }
-            
-            .mode-selector {
-                margin: 15px 20px;
-                padding: 15px;
-            }
-            
-            .mode-toggle {
-                flex-direction: column;
-                gap: 10px;
+                padding: 1rem;
             }
         }
     </style>
@@ -292,119 +228,88 @@
     <div class="container">
         <div class="header">
             <h1>💪 Workout Logger</h1>
-            <p>Log your workouts with natural language</p>
-            
-            <!-- Mode Selector Toggle -->
-            <div class="mode-selector">
-                <div class="mode-toggle">
-                    <span class="mode-label">🎯 Track Mode</span>
-                    <div class="toggle-switch" id="modeToggle">
-                        <div class="toggle-slider"></div>
-                    </div>
-                    <span class="mode-label">🧪 Trial Mode</span>
-                </div>
-                <div class="mode-description" id="modeDescription">
-                    Save workouts permanently to your database
-                </div>
-            </div>
         </div>
         
-        <div class="input-section">
-            <form id="workoutForm">
-                <div class="input-group">
-                    <label for="workoutInput">What did you do today?</label>
-                    <textarea 
-                        id="workoutInput" 
-                        class="input-field" 
-                        placeholder="e.g., Did 20 pull-ups, 50 push-ups, and ran 5km in 25 minutes"
-                        rows="3"
-                    ></textarea>
+        <div class="main-content">
+            <div class="input-section">
+                <div class="examples">
+                    <h3>Example inputs:</h3>
+                    <ul>
+                        <li>"5 pull-ups, 10 push-ups"</li>
+                        <li>"ran 5km in 25 minutes"</li>
+                        <li>"bench press 3 sets of 8 reps at 80kg"</li>
+                        <li>"cindy 5 rounds"</li>
+                        <li>"squats 50kg 3x10 yesterday"</li>
+                    </ul>
                 </div>
                 
-                <button type="submit" class="submit-btn" id="submitBtn">
-                    Log Workout
-                </button>
-                
-                <div class="loading" id="loading">
-                    <div class="spinner"></div>
-                    <p>Processing your workout...</p>
-                </div>
-                
-                <div class="message" id="message"></div>
-            </form>
-            
-            <div class="examples">
-                <h3>💡 Example inputs:</h3>
-                <ul>
-                    <li><strong>Logging:</strong> "Did 3 sets of 10 pull-ups at bodyweight"</li>
-                    <li><strong>Logging:</strong> "Ran 5km in 25 minutes yesterday"</li>
-                    <li><strong>Logging:</strong> "Bench press 80kg for 5 reps, 3 sets"</li>
-                    <li><strong>Editing:</strong> "Remove the latest exercise"</li>
-                    <li><strong>Editing:</strong> "Delete last workout"</li>
-                </ul>
-            </div>
-        </div>
-        
-        <div class="recent-workouts">
-            <h2>📊 Recent Workouts</h2>
-            <div id="workoutsList">
-                {% if recent_workouts %}
-                    {% for workout in recent_workouts[:10] %}
-                        <div class="workout-item">
-                            <div class="workout-date">{{ workout.date }}</div>
-                            <div class="workout-details">
-                                {{ workout.exercise_name }}
-                                {% if workout.weight_kg %} - {{ workout.weight_kg }}kg{% endif %}
-                                {% if workout.reps %} - {{ workout.reps }} reps{% endif %}
-                                {% if workout.distance_km %} - {{ workout.distance_km }}km{% endif %}
-                                {% if workout.time_seconds %} - {{ (workout.time_seconds/60)|round(1) }} min{% endif %}
-                            </div>
+                <div class="input-form">
+                    <form id="workoutForm">
+                        <div class="input-wrapper">
+                            <textarea 
+                                id="workoutInput" 
+                                placeholder="Describe your workout in natural language..."
+                                required
+                            ></textarea>
                         </div>
-                    {% endfor %}
-                {% else %}
-                    <p style="color: #666; text-align: center; padding: 20px;">
-                        No workouts logged yet. Start by entering your first workout above!
-                    </p>
-                {% endif %}
+                        <button type="submit" class="submit-button" id="submitBtn">
+                            Log Workout
+                        </button>
+                    </form>
+                </div>
+            </div>
+            
+            <div id="message"></div>
+            <div id="loading" class="loading">Processing your workout...</div>
+            
+            <div class="recent-workouts">
+                <h2>Recent Workouts</h2>
+                <div id="workoutsList">
+                    {% if recent_workouts %}
+                        {% for workout in recent_workouts %}
+                        <div class="workout-item">
+                            <div class="workout-header">
+                                {{ workout.date }} - {{ workout.activity_name }} (Set {{ workout.set_number }})
+                            </div>
+                            <div class="workout-details">
+                                {{ workout.metric_type }}: {{ workout.value }} {{ workout.unit or '' }}
+                            </div>
+                            {% if workout.raw_input %}
+                            <div class="workout-original">
+                                Original: "{{ workout.raw_input }}"
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="empty-state">
+                            No workouts logged yet. Start by describing your workout above!
+                        </div>
+                    {% endif %}
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Mode toggle functionality
-        let isTrialMode = false;
-        const modeToggle = document.getElementById('modeToggle');
-        const modeDescription = document.getElementById('modeDescription');
-        
-        modeToggle.addEventListener('click', function() {
-            isTrialMode = !isTrialMode;
-            this.classList.toggle('active');
-            
-            if (isTrialMode) {
-                modeDescription.textContent = 'Test the system without saving to your database';
-            } else {
-                modeDescription.textContent = 'Save workouts permanently to your database';
-            }
-        });
-        
-        // Form submission
         document.getElementById('workoutForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const input = document.getElementById('workoutInput').value.trim();
+            const input = document.getElementById('workoutInput');
+            const messageDiv = document.getElementById('message');
+            const loadingDiv = document.getElementById('loading');
             const submitBtn = document.getElementById('submitBtn');
-            const loading = document.getElementById('loading');
-            const message = document.getElementById('message');
             
-            if (!input) {
-                showMessage('Please enter a workout description', 'error');
+            if (!input.value.trim()) {
+                messageDiv.innerHTML = '<div class="message error">Please enter a workout description</div>';
                 return;
             }
             
             // Show loading state
+            loadingDiv.style.display = 'block';
+            messageDiv.innerHTML = '';
             submitBtn.disabled = true;
-            loading.style.display = 'block';
-            message.style.display = 'none';
+            submitBtn.textContent = 'Processing...';
             
             try {
                 const response = await fetch('/log', {
@@ -412,47 +317,28 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ 
-                        input: input,
-                        trial_mode: isTrialMode
+                    body: JSON.stringify({
+                        workout: input.value
                     })
                 });
                 
-                const result = await response.json();
+                const data = await response.json();
                 
-                if (result.success) {
-                    showMessage(result.message, 'success');
-                    document.getElementById('workoutInput').value = '';
-                    
-                    // Only refresh if not in trial mode
-                    if (!isTrialMode) {
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1500);
-                    }
+                if (data.success) {
+                    messageDiv.innerHTML = '<div class="message success">✅ Workout logged successfully!</div>';
+                    input.value = '';
+                    // Reload page to show new workout
+                    setTimeout(() => location.reload(), 1500);
                 } else {
-                    showMessage(result.error, 'error');
+                    messageDiv.innerHTML = `<div class="message error">❌ Error: ${data.error}</div>`;
                 }
             } catch (error) {
-                showMessage('Network error. Please try again.', 'error');
+                messageDiv.innerHTML = `<div class="message error">❌ Network error: ${error.message}</div>`;
             } finally {
+                loadingDiv.style.display = 'none';
                 submitBtn.disabled = false;
-                loading.style.display = 'none';
+                submitBtn.textContent = 'Log Workout';
             }
-        });
-        
-        function showMessage(text, type) {
-            const message = document.getElementById('message');
-            message.textContent = text;
-            message.className = `message ${type}`;
-            message.style.display = 'block';
-        }
-        
-        // Auto-resize textarea
-        const textarea = document.getElementById('workoutInput');
-        textarea.addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = this.scrollHeight + 'px';
         });
     </script>
 </body>
