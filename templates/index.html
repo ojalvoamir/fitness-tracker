@@ -1,10 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workout Logger</title>
-    <style>
+&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+    &lt;meta charset="UTF-8"&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0"&gt;
+    &lt;title&gt;Workout Logger&lt;/title&gt;
+    &lt;style&gt;
         * {
             margin: 0;
             padding: 0;
@@ -196,7 +196,7 @@
             color: #6b7280;
         }
         
-        .workout-original {
+        .workout-notes {
             font-size: 0.75rem;
             color: #9ca3af;
             margin-top: 0.25rem;
@@ -222,76 +222,79 @@
                 padding: 1rem;
             }
         }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>💪 Workout Logger</h1>
-        </div>
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;div class="container"&gt;
+        &lt;div class="header"&gt;
+            &lt;h1&gt;Workout Logger&lt;/h1&gt;
+        &lt;/div&gt;
         
-        <div class="main-content">
-            <div class="input-section">
-                <div class="examples">
-                    <h3>Example inputs:</h3>
-                    <ul>
-                        <li>"5 pull-ups, 10 push-ups"</li>
-                        <li>"ran 5km in 25 minutes"</li>
-                        <li>"bench press 3 sets of 8 reps at 80kg"</li>
-                        <li>"cindy 5 rounds"</li>
-                        <li>"squats 50kg 3x10 yesterday"</li>
-                    </ul>
-                </div>
+        &lt;div class="main-content"&gt;
+            &lt;div class="input-section"&gt;
+                &lt;div class="examples"&gt;
+                    &lt;h3&gt;Example inputs:&lt;/h3&gt;
+                    &lt;ul&gt;
+                        &lt;li&gt;"5 pull-ups, 10 push-ups"&lt;/li&gt;
+                        &lt;li&gt;"ran 5km in 25 minutes"&lt;/li&gt;
+                        &lt;li&gt;"bench press 3 sets of 8 reps at 80kg"&lt;/li&gt;
+                        &lt;li&gt;"squats 50kg 3x10 yesterday"&lt;/li&gt;
+                        &lt;li&gt;"100 push-ups, felt good"&lt;/li&gt;
+                    &lt;/ul&gt;
+                &lt;/div&gt;
                 
-                <div class="input-form">
-                    <form id="workoutForm">
-                        <div class="input-wrapper">
-                            <textarea 
+                &lt;div class="input-form"&gt;
+                    &lt;form id="workoutForm"&gt;
+                        &lt;div class="input-wrapper"&gt;
+                            &lt;textarea 
                                 id="workoutInput" 
                                 placeholder="Describe your workout in natural language..."
                                 required
-                            ></textarea>
-                        </div>
-                        <button type="submit" class="submit-button" id="submitBtn">
+                            &gt;&lt;/textarea&gt;
+                        &lt;/div&gt;
+                        &lt;button type="submit" class="submit-button" id="submitBtn"&gt;
                             Log Workout
-                        </button>
-                    </form>
-                </div>
-            </div>
+                        &lt;/button&gt;
+                    &lt;/form&gt;
+                &lt;/div&gt;
+            &lt;/div&gt;
             
-            <div id="message"></div>
-            <div id="loading" class="loading">Processing your workout...</div>
+            &lt;div id="message"&gt;&lt;/div&gt;
+            &lt;div id="loading" class="loading"&gt;Processing your workout...&lt;/div&gt;
             
-            <div class="recent-workouts">
-                <h2>Recent Workouts</h2>
-                <div id="workoutsList">
+            &lt;div class="recent-workouts"&gt;
+                &lt;h2&gt;Recent Workouts&lt;/h2&gt;
+                &lt;div id="workoutsList"&gt;
                     {% if recent_workouts %}
                         {% for workout in recent_workouts %}
-                        <div class="workout-item">
-                            <div class="workout-header">
-                                {{ workout.date }} - {{ workout.activity_name }} (Set {{ workout.set_number }})
-                            </div>
-                            <div class="workout-details">
-                                {{ workout.metric_type }}: {{ workout.value }} {{ workout.unit or '' }}
-                            </div>
-                            {% if workout.raw_input %}
-                            <div class="workout-original">
-                                Original: "{{ workout.raw_input }}"
-                            </div>
+                        &lt;div class="workout-item"&gt;
+                            &lt;div class="workout-header"&gt;
+                                {{ workout.date }} - {{ workout.exercise_name }} (Set {{ workout.set_number }})
+                            &lt;/div&gt;
+                            &lt;div class="workout-details"&gt;
+                                {% if workout.reps %}{{ workout.reps }} reps{% endif %}
+                                {% if workout.weight_kg %} at {{ workout.weight_kg }}kg{% endif %}
+                                {% if workout.distance_km %}{{ workout.distance_km }}km{% endif %}
+                                {% if workout.time_seconds %} in {{ (workout.time_seconds // 60) }}:{{ '%02d'|format(workout.time_seconds % 60) }}{% endif %}
+                            &lt;/div&gt;
+                            {% if workout.notes %}
+                            &lt;div class="workout-notes"&gt;
+                                Notes: {{ workout.notes }}
+                            &lt;/div&gt;
                             {% endif %}
-                        </div>
+                        &lt;/div&gt;
                         {% endfor %}
                     {% else %}
-                        <div class="empty-state">
+                        &lt;div class="empty-state"&gt;
                             No workouts logged yet. Start by describing your workout above!
-                        </div>
+                        &lt;/div&gt;
                     {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
+                &lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
 
-    <script>
+    &lt;script&gt;
         document.getElementById('workoutForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -301,7 +304,7 @@
             const submitBtn = document.getElementById('submitBtn');
             
             if (!input.value.trim()) {
-                messageDiv.innerHTML = '<div class="message error">Please enter a workout description</div>';
+                messageDiv.innerHTML = '&lt;div class="message error"&gt;Please enter a workout description&lt;/div&gt;';
                 return;
             }
             
@@ -318,28 +321,28 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        workout: input.value
+                        input: input.value
                     })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    messageDiv.innerHTML = '<div class="message success">✅ Workout logged successfully!</div>';
+                    messageDiv.innerHTML = '&lt;div class="message success"&gt;Workout logged successfully!&lt;/div&gt;';
                     input.value = '';
                     // Reload page to show new workout
-                    setTimeout(() => location.reload(), 1500);
+                    setTimeout(() =&gt; location.reload(), 1500);
                 } else {
-                    messageDiv.innerHTML = `<div class="message error">❌ Error: ${data.error}</div>`;
+                    messageDiv.innerHTML = `&lt;div class="message error"&gt;Error: ${data.error}&lt;/div&gt;`;
                 }
             } catch (error) {
-                messageDiv.innerHTML = `<div class="message error">❌ Network error: ${error.message}</div>`;
+                messageDiv.innerHTML = `&lt;div class="message error"&gt;Network error: ${error.message}&lt;/div&gt;`;
             } finally {
                 loadingDiv.style.display = 'none';
                 submitBtn.disabled = false;
                 submitBtn.textContent = 'Log Workout';
             }
         });
-    </script>
-</body>
-</html>
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
