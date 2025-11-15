@@ -30,7 +30,7 @@ if not all([GOOGLE_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY]):
     exit(1)
 
 genai.configure(api_key=GOOGLE_API_KEY)  # ✅ FIXED: was GEMINI_API_KEY
-model = genai.GenerativeModel('gemini-1.5-pro-002')
+model = genai.GenerativeModel('models/gemini-2.5-flash')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 class WorkoutParser:
