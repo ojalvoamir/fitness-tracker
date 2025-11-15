@@ -16,17 +16,20 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configuration
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+# Configuration - FIXED VARIABLE NAMES
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')  # ✅ FIXED: was GEMINI_API_KEY
 SUPABASE_URL = os.environ.get('SUPABASE_URL') 
 SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY')
 
 # Initialize services
-if not all([GEMINI_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY]):
+if not all([GOOGLE_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY]):
     logger.error("Missing required environment variables")
+    logger.error(f"GOOGLE_API_KEY: {'✅' if GOOGLE_API_KEY else '❌'}")
+    logger.error(f"SUPABASE_URL: {'✅' if SUPABASE_URL else '❌'}")
+    logger.error(f"SUPABASE_ANON_KEY: {'✅' if SUPABASE_ANON_KEY else '❌'}")
     exit(1)
 
-genai.configure(api_key=GEMINI_API_KEY)
+genai.configure(api_key=GOOGLE_API_KEY)  # ✅ FIXED: was GEMINI_API_KEY
 model = genai.GenerativeModel('gemini-1.5-flash')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
