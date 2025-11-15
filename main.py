@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template
 import google.generativeai as genai
 from supabase import create_client, Client
 
@@ -116,8 +116,16 @@ def log_workout_to_supabase(workout_data):
 
 @app.route('/')
 def index():
-    """Serve the main page"""
-    return render_template_string(open('index.html').read())
+    """Serve the main page with recent workouts"""
+    try:
+        # Get recent workouts for the template
+        result = supabase.table('activity_logs').select('*').order('date', desc=True).limit(10).execute()
+        recent_workouts = result.data
+        return render_template('index.html', recent_workouts=recent_workouts)
+    except Exception as e:
+        logger.error(f"Error loading recent workouts: {e}")
+        # Still render template even if we can't load workouts
+        return render_template('index.html', recent_workouts=[])
 
 @app.route('/log', methods=['POST'])
 def log_workout():
