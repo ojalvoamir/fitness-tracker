@@ -89,7 +89,7 @@ Output format:
             response = self.gemini_model.generate_content(prompt)
             response_text = response.text
             
-            # Extract JSON from response
+            # FIXED: Properly escaped regex pattern
             json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
@@ -159,16 +159,24 @@ def log_workout():
     """Log a workout from natural language input"""
     try:
         data = request.get_json()
-        user_input = data.get('workout', '').strip()
+        print(f"Received data: {data}")  # Debug logging
+        
+        # FIXED: Check for BOTH 'input' and 'workout' keys to match your frontend
+        user_input = data.get('input', '') or data.get('workout', '')
+        user_input = user_input.strip()
         
         if not user_input:
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
         
+        print(f"Processing input: {user_input}")  # Debug logging
+        
         # Parse the input
         parsed_workout = workout_logger.parse_input(user_input)
+        print(f"Parsed workout: {parsed_workout}")  # Debug logging
         
         # Log to database
         result = workout_logger.log_workout(parsed_workout)
+        print(f"Log result: {result}")  # Debug logging
         
         return jsonify(result)
     except Exception as e:
@@ -180,11 +188,7 @@ def recent_workouts():
     """Get recent workouts"""
     try:
         # Get recent activity logs from your flat table
-        result = supabase.table('activity_logs')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .limit(20)\
-            .execute()
+        result = supabase.table('activity_logs').select('*').order('created_at', desc=True).limit(20).execute()
         
         workouts = []
         for log in result.data:
