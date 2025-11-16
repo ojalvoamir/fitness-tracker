@@ -43,7 +43,7 @@ class WorkoutLogger:
         self.gemini_model = gemini_model
         self.supabase = supabase_client
     
-    def generate_gemini_prompt(self, user_input: str, current_date: str) -&gt; str:
+    def generate_gemini_prompt(self, user_input: str, current_date: str) -> str:
         """Generate prompt for Gemini based on your actual flat table schema"""
         return f"""
 Today's date is {current_date}.
@@ -79,7 +79,7 @@ Output format:
 }}
 """
     
-    def parse_input(self, user_input: str, current_date: str = None) -&gt; dict:
+    def parse_input(self, user_input: str, current_date: str = None) -> dict:
         """Parse user input using Gemini"""
         if current_date is None:
             current_date = datetime.now().strftime('%Y-%m-%d')
@@ -90,7 +90,9 @@ Output format:
             response_text = response.text
             
             # Extract JSON from response
-            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
+            json_match = re.search(r'```json
+(.*?)
+```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
             else:
@@ -101,7 +103,7 @@ Output format:
             print(f"Error parsing input: {e}")
             raise
     
-    def log_workout(self, workout_data: dict) -&gt; dict:
+    def log_workout(self, workout_data: dict) -> dict:
         """Log workout to database using YOUR ACTUAL FLAT TABLE SCHEMA"""
         try:
             logged_exercises = []
@@ -180,11 +182,7 @@ def recent_workouts():
     """Get recent workouts"""
     try:
         # Get recent activity logs from your flat table
-        result = supabase.table('activity_logs')\
-            .select('*')\
-            .order('created_at', desc=True)\
-            .limit(20)\
-            .execute()
+        result = supabase.table('activity_logs')            .select('*')            .order('created_at', desc=True)            .limit(20)            .execute()
         
         workouts = []
         for log in result.data:
