@@ -90,9 +90,7 @@ Output format:
             response_text = response.text
             
             # Extract JSON from response
-            json_match = re.search(r'```json
-(.*?)
-```', response_text, re.DOTALL)
+            json_match = re.search(r'```json\n(.*?)\n```', response_text, re.DOTALL)
             if json_match:
                 json_string = json_match.group(1).strip()
             else:
@@ -153,7 +151,7 @@ workout_logger = WorkoutLogger(gemini_model, supabase)
 
 @app.route('/')
 def index():
-    """Main page"""
+    """Main page - renders the HTML template"""
     return render_template('index.html')
 
 @app.route('/log', methods=['POST'])
@@ -182,7 +180,11 @@ def recent_workouts():
     """Get recent workouts"""
     try:
         # Get recent activity logs from your flat table
-        result = supabase.table('activity_logs')            .select('*')            .order('created_at', desc=True)            .limit(20)            .execute()
+        result = supabase.table('activity_logs')\
+            .select('*')\
+            .order('created_at', desc=True)\
+            .limit(20)\
+            .execute()
         
         workouts = []
         for log in result.data:
