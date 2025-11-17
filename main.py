@@ -61,8 +61,7 @@ Convert the following workout description into structured JSON.
 Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
 Use the following known activity names: [{activity_list}]
 Use the following known units: [{unit_list}]
-If the input matches any of these, use the same writing style.
-If the input is new, use the most conventional format.
+For each exercise and unit, if a similar name or unit already exists in the known list, use the exact same spelling and format from the list. Do not invent new variants or plural forms. Only create a new name or unit if it is clearly a new activity or metric.
 Return ONLY the JSON and no additional text.
 
 Input: "{user_input}"
