@@ -113,22 +113,21 @@ Output format:
             response_text = response.text.strip()
 
             try:
-                parsed_json = json.loads(response_text)
+                return json.loads(response_text)
             except json.JSONDecodeError:
-                match = re.search(r'```json\\n(.*?)\\n```', response_text, re.DOTALL)
+                match = re.search(r'{.*}', response_text, re.DOTALL)
                 if match:
-                    parsed_json = json.loads(match.group(1).strip())
-                else:
-                    raise ValueError("Could not parse JSON from Gemini response")
-
-            return parsed_json
+                    return json.loads(match.group(0))
+                raise ValueError("Could not parse JSON from Gemini response")
         except Exception as e:
             print(f"Error parsing input: {e}")
             raise
 
     def log_workout(self, workout_data: dict) -> dict:
         try:
+            logged_exercises = []
             rows_to_insert = []
+
             for exercise in workout_data.get('exercises', []):
                 row = {
                     'date': workout_data.get('date'),
@@ -143,14 +142,21 @@ Output format:
                     'notes': None
                 }
                 rows_to_insert.append(row)
+                logged_exercises.append({
+                    'exercise': exercise.get('activity_name'),
+                    'set': exercise.get('set_number', 1),
+                    'metric_type': exercise.get('metric_type'),
+                    'value': exercise.get('value'),
+                    'unit': exercise.get('unit')
+                })
 
             if rows_to_insert:
-                supabase.table('activity_logs').insert(rows_to_insert).execute()
+                self.supabase.table('activity_logs').insert(rows_to_insert).execute()
 
             return {
                 'success': True,
-                'message': f'Logged {len(rows_to_insert)} exercises',
-                'exercises': rows_to_insert
+                'message': f'Logged {len(logged_exercises)} exercises',
+                'exercises': logged_exercises
             }
         except Exception as e:
             print(f"Error logging workout: {e}")
@@ -166,7 +172,8 @@ def index():
 def log_workout():
     try:
         data = request.get_json()
-        user_input = data.get('input', '').strip()
+        user_input = data.get('input', '') or data.get('workout', '')
+        user_input = user_input.strip()
 
         if not user_input:
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
@@ -191,16 +198,17 @@ def log_workout():
 def recent_workouts():
     try:
         result = supabase.table('activity_logs').select('*').order('created_at', desc=True).limit(20).execute()
-        workouts = [{
-            'date': log['date'],
-            'activity_name': log['activity_name'],
-            'set_number': log['set_number'],
-            'metric_type': log['metric_type'],
-            'value': log['value'],
-            'unit': log['unit'],
-            'raw_input': log['raw_input']
-        } for log in result.data]
-
+        workouts = []
+        for log in result.data:
+            workouts.append({
+                'date': log['date'],
+                'activity_name': log['activity_name'],
+                'set_number': log['set_number'],
+                'metric_type': log['metric_type'],
+                'value': log['value'],
+                'unit': log['unit'],
+                'raw_input': log['raw_input']
+            })
         return jsonify({'success': True, 'workouts': workouts})
     except Exception as e:
         print(f"Error getting recent workouts: {e}")
