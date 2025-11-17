@@ -6,7 +6,6 @@ from flask import Flask, render_template, request, jsonify
 import google.generativeai as genai
 from supabase import create_client
 from dotenv import load_dotenv
-from difflib import get_close_matches
 
 # Load environment variables
 load_dotenv()
@@ -33,54 +32,37 @@ def initialize_apis():
 
 gemini_model, supabase = initialize_apis()
 
-# Validation function
-def validate_exercises_and_units(parsed_workout, supabase_client):
-    try:
-        activity_result = supabase_client.table('activity_logs').select('activity_name').execute()
-        unit_result = supabase_client.table('activity_logs').select('unit').execute()
-
-        existing_activities = set(log['activity_name'] for log in activity_result.data if log.get('activity_name'))
-        existing_units = set(log['unit'] for log in unit_result.data if log.get('unit'))
-
-        unknown_exercises = []
-        unknown_units = []
-        suggestions = []
-
-        for exercise in parsed_workout.get('exercises', []):
-            name = exercise.get('activity_name')
-            unit = exercise.get('unit')
-
-            if name and name not in existing_activities:
-                unknown_exercises.append(name)
-                match = get_close_matches(name, existing_activities, n=1)
-                if match:
-                    suggestions.append({'type': 'exercise_name', 'input': name, 'suggested': match[0]})
-
-            if unit and unit not in existing_units:
-                unknown_units.append(unit)
-                match = get_close_matches(unit, existing_units, n=1)
-                if match:
-                    suggestions.append({'type': 'unit', 'input': unit, 'suggested': match[0]})
-
-        return {
-            'unknown_exercises': unknown_exercises,
-            'unknown_units': unknown_units,
-            'suggestions': suggestions
-        }
-    except Exception as e:
-        print(f"Error during validation: {e}")
-        return {}
-
 class WorkoutLogger:
     def __init__(self, gemini_model, supabase_client):
         self.gemini_model = gemini_model
         self.supabase = supabase_client
 
+    def fetch_known_styles(self):
+        try:
+            activity_result = self.supabase.table('activity_logs').select('activity_name').execute()
+            unit_result = self.supabase.table('activity_logs').select('unit').execute()
+
+            known_activities = sorted(set(log['activity_name'] for log in activity_result.data if log.get('activity_name')))
+            known_units = sorted(set(log['unit'] for log in unit_result.data if log.get('unit')))
+
+            return known_activities, known_units
+        except Exception as e:
+            print(f"Error fetching known styles: {e}")
+            return [], []
+
     def generate_gemini_prompt(self, user_input: str, current_date: str) -> str:
+        known_activities, known_units = self.fetch_known_styles()
+        activity_list = ', '.join(f'"{a}"' for a in known_activities)
+        unit_list = ', '.join(f'"{u}"' for u in known_units)
+
         return f"""
 Today's date is {current_date}.
 Convert the following workout description into structured JSON.
 Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
+Use the following known activity names: [{activity_list}]
+Use the following known units: [{unit_list}]
+If the input matches any of these, use the same writing style.
+If the input is new, use the most conventional format.
 Return ONLY the JSON and no additional text.
 
 Input: "{user_input}"
@@ -179,15 +161,6 @@ def log_workout():
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
 
         parsed_workout = workout_logger.parse_input(user_input)
-        validation = validate_exercises_and_units(parsed_workout, supabase)
-
-        if validation['suggestions']:
-            return jsonify({
-                'success': False,
-                'error': 'Validation failed',
-                'validation': validation
-            }), 400
-
         result = workout_logger.log_workout(parsed_workout)
         return jsonify(result)
     except Exception as e:
