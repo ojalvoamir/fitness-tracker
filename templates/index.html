@@ -1,10 +1,11 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workout Logger</title>
-    <style>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Workout Logger</title>
+<style>
         body {
             font-family: Arial, sans-serif;
             max-width: 800px;
@@ -102,65 +103,53 @@
         }
     </style>
 </head>
-<body>
-    <div class="container">
-<div style="background-color: #fff3cd; color: #856404; padding: 15px; border-radius: 5px; border: 1px solid #ffeeba; margin-bottom: 20px;">
-<strong>Development Version:</strong> This is a development version of the Workout Logger app. Data and features may change without notice.
+<body><div style="background-color: yellow; padding: 10px; text-align: center; font-weight: bold;">Development Version - For Testing Purposes Only</div>
+<div class="container">
+<h1>Workout Logger</h1>
+<div class="examples">
+<h3>Example inputs:</h3>
+<ul>
+<li>"5 pull-ups, 10 push-ups"</li>
+<li>"ran 5km in 25 minutes"</li>
+<li>"bench press 3 sets of 8 reps at 80kg"</li>
+<li>"100 push-ups, felt good"</li>
+</ul>
 </div>
-        <h1>Workout Logger</h1>
-        
-        <div class="examples">
-            <h3>Example inputs:</h3>
-            <ul>
-                <li>"5 pull-ups, 10 push-ups"</li>
-                <li>"ran 5km in 25 minutes"</li>
-                <li>"bench press 3 sets of 8 reps at 80kg"</li>
-                <li>"100 push-ups, felt good"</li>
-            </ul>
-        </div>
-        
-        <div class="input-section">
-            <form id="workoutForm">
-                <textarea 
-                    id="workoutInput" 
-                    placeholder="Describe your workout in natural language..."
-                    required
-                ></textarea>
-                <br>
-                <button type="submit" id="submitBtn">Log Workout</button>
-            </form>
-        </div>
-        
-        <div id="message"></div>
-        
-        <div class="recent-workouts">
-            <h2>Recent Workouts</h2>
-            <div id="workoutsList">
+<div class="input-section">
+<form id="workoutForm">
+<textarea id="workoutInput" placeholder="Describe your workout in natural language..." required=""></textarea>
+<br/>
+<button id="submitBtn" type="submit">Log Workout</button>
+</form>
+</div>
+<div id="message"></div>
+<div class="recent-workouts">
+<h2>Recent Workouts</h2>
+<div id="workoutsList">
                 {% if recent_workouts %}
                     {% for workout in recent_workouts %}
                     <div class="workout-item">
-                        <div class="workout-header">
+<div class="workout-header">
                             {{ workout.date }} - {{ workout.exercise_name }} (Set {{ workout.set_number }})
                         </div>
-                        <div class="workout-details">
+<div class="workout-details">
                             {% if workout.reps %}{{ workout.reps }} reps{% endif %}
                             {% if workout.weight_kg %} at {{ workout.weight_kg }}kg{% endif %}
                             {% if workout.distance_km %}{{ workout.distance_km }}km{% endif %}
                             {% if workout.time_seconds %} in {{ (workout.time_seconds // 60) }}:{{ '%02d'|format(workout.time_seconds % 60) }}{% endif %}
                             {% if workout.notes %} - {{ workout.notes }}{% endif %}
                         </div>
-                    </div>
+</div>
                     {% endfor %}
                 {% else %}
                     <div class="workout-item">
-                        <div class="workout-details">No workouts logged yet. Start by describing your workout above!</div>
-                    </div>
+<div class="workout-details">No workouts logged yet. Start by describing your workout above!</div>
+</div>
                 {% endif %}
             </div>
-        </div>
-    </div>
-
-    <script>
+</div>
+</div>
+<script>
         document.getElementById('workoutForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
