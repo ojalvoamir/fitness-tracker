@@ -111,6 +111,7 @@ Output format:
             prompt = self.generate_gemini_prompt(user_input, current_date)
             response = self.gemini_model.generate_content(prompt)
             response_text = response.text.strip()
+            print("Gemini raw response:", response_text)
 
             try:
                 parsed_json = json.loads(response_text)
