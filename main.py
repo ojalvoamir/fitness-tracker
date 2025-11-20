@@ -175,7 +175,7 @@ def log_workout():
         parsed_workout = workout_logger.parse_input(user_input)
         validation = validate_exercises_and_units(parsed_workout, supabase)
 
-        if validation['suggestions']:
+        if validation.get('suggestions'):
             return jsonify({
                 'success': False,
                 'error': 'Validation failed',
