@@ -65,7 +65,7 @@ class WorkoutLogger:
 Today's date is {current_date}.
 Convert the following workout description into structured JSON.
 Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
-Return ONLY the JSON and no additional text.
+Return ONLY the JSON and no additional text. Do NOT use markdown, triple backticks, or any extra formatting.
 Input: "{user_input}"
 Output format:
 {{
