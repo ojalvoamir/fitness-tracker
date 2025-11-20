@@ -1,16 +1,17 @@
-import os
+
 import re
 import json
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
-import google.generativeai as genai
-from supabase import create_client
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+from supabase import create_client
+import google.generativeai as genai
 from difflib import get_close_matches
 
 # Load environment variables
 load_dotenv()
 
+# Initialize Flask app
 app = Flask(__name__)
 
 # Configuration
@@ -36,8 +37,8 @@ gemini_model, supabase = initialize_apis()
 # Validation function
 def validate_exercises_and_units(parsed_workout, supabase_client):
     try:
-        activity_result = supabase_client.table('activity_logs').select('activity_name').execute()
-        unit_result = supabase_client.table('activity_logs').select('unit').execute()
+        activity_result = supabase_client.table('activity_names').select('activity_name').execute()
+        unit_result = supabase_client.table('metrics').select('unit').execute()
 
         existing_activities = set(log['activity_name'] for log in activity_result.data if log.get('activity_name'))
         existing_units = set(log['unit'] for log in unit_result.data if log.get('unit'))
@@ -71,17 +72,17 @@ def validate_exercises_and_units(parsed_workout, supabase_client):
         print(f"Error during validation: {e}")
         return {}
 
+# WorkoutLogger class
 class WorkoutLogger:
-    def __init__(self, gemini_model, supabase_client):
+    def __init__(self, gemini_model):
         self.gemini_model = gemini_model
-        self.supabase = supabase_client
 
     def generate_gemini_prompt(self, user_input: str, current_date: str) -> str:
         return f"""
 Today's date is {current_date}.
 Convert the following workout description into structured JSON.
 Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
-Return ONLY the JSON and no additional text. Don't use markdown and any additional characters such as '.
+Return ONLY the JSON and no additional text. Don't use markdown and any additional characters such as '.'.
 
 Input: "{user_input}"
 
@@ -116,9 +117,9 @@ Output format:
             try:
                 parsed_json = json.loads(response_text)
             except json.JSONDecodeError:
-                match = re.search(r'```json\\n(.*?)\\n```', response_text, re.DOTALL)
+                match = re.search(r'{.*}', response_text, re.DOTALL)
                 if match:
-                    parsed_json = json.loads(match.group(1).strip())
+                    parsed_json = json.loads(match.group(0).strip())
                 else:
                     raise ValueError("Could not parse JSON from Gemini response")
 
@@ -127,8 +128,8 @@ Output format:
             print(f"Error parsing input: {e}")
             raise
 
-
-def log_workout(workout_data):
+# New logging function using improved schema
+def log_workout_to_supabase(workout_data):
     try:
         user_id = workout_data.get('user_id', 'default_user')
         username = workout_data.get('username', 'User')
@@ -176,19 +177,15 @@ def log_workout(workout_data):
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+# Instantiate logger
+workout_logger = WorkoutLogger(gemini_model)
 
-workout_logger = WorkoutLogger(gemini_model, supabase)
-
-@app.route('/')
-def index():
-    return render_template('index.html')
-
+# Flask route
 @app.route('/log', methods=['POST'])
 def log_workout():
     try:
         data = request.get_json()
         user_input = data.get('input', '').strip()
-
         if not user_input:
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
 
@@ -202,30 +199,14 @@ def log_workout():
                 'validation': validation
             }), 400
 
-        result = workout_logger.log_workout(parsed_workout)
+        result = log_workout_to_supabase(parsed_workout)
         return jsonify(result)
+
     except Exception as e:
         print(f"Error in log_workout: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/recent')
-def recent_workouts():
-    try:
-        result = supabase.table('activity_logs').select('*').order('created_at', desc=True).limit(20).execute()
-        workouts = [{
-            'date': log['date'],
-            'activity_name': log['activity_name'],
-            'set_number': log['set_number'],
-            'metric_type': log['metric_type'],
-            'value': log['value'],
-            'unit': log['unit'],
-            'raw_input': log['raw_input']
-        } for log in result.data]
-
-        return jsonify({'success': True, 'workouts': workouts})
-    except Exception as e:
-        print(f"Error getting recent workouts: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
-
+# Run the app
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+''')
