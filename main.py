@@ -127,35 +127,55 @@ Output format:
             print(f"Error parsing input: {e}")
             raise
 
-    def log_workout(self, workout_data: dict) -> dict:
-        try:
-            rows_to_insert = []
-            for exercise in workout_data.get('exercises', []):
-                row = {
-                    'date': workout_data.get('date'),
-                    'activity_name': exercise.get('activity_name'),
-                    'set_number': exercise.get('set_number', 1),
-                    'metric_type': exercise.get('metric_type'),
-                    'value': exercise.get('value'),
-                    'unit': exercise.get('unit'),
-                    'user_id': workout_data.get('user_id', 'default_user'),
-                    'username': workout_data.get('username', 'User'),
-                    'raw_input': workout_data.get('raw_input', ''),
-                    'notes': None
-                }
-                rows_to_insert.append(row)
 
-            if rows_to_insert:
-                supabase.table('activity_logs').insert(rows_to_insert).execute()
+def log_workout(workout_data):
+    try:
+        user_id = workout_data.get('user_id', 'default_user')
+        username = workout_data.get('username', 'User')
+        workout_date = workout_data.get('date')
+        raw_input = workout_data.get('raw_input', '')
 
-            return {
-                'success': True,
-                'message': f'Logged {len(rows_to_insert)} exercises',
-                'exercises': rows_to_insert
+        # Ensure user exists
+        user_result = supabase.table('users').select('user_id').eq('user_id', user_id).execute()
+        if not user_result.data:
+            supabase.table('users').insert([{'user_id': user_id, 'username': username}]).execute()
+
+        # Check if session exists
+        session_result = supabase.table('sessions').select('session_id').eq('user_id', user_id).eq('date', workout_date).execute()
+        if session_result.data:
+            session_id = session_result.data[0]['session_id']
+        else:
+            session_insert = supabase.table('sessions').insert([{'user_id': user_id, 'date': workout_date}]).execute()
+            session_id = session_insert.data[0]['session_id']
+
+        # Insert sets and metrics
+        for exercise in workout_data.get('exercises', []):
+            set_data = {
+                'session_id': session_id,
+                'activity_name': exercise.get('activity_name'),
+                'raw_input': raw_input,
+                'notes': None
             }
-        except Exception as e:
-            print(f"Error logging workout: {e}")
-            return {'success': False, 'error': str(e)}
+            set_insert = supabase.table('sets').insert([set_data]).execute()
+            set_id = set_insert.data[0]['set_id']
+
+            metric_data = {
+                'set_id': set_id,
+                'metric_type': exercise.get('metric_type'),
+                'value': exercise.get('value'),
+                'unit': exercise.get('unit')
+            }
+            supabase.table('metrics').insert([metric_data]).execute()
+
+        return {
+            'success': True,
+            'message': f"Logged {len(workout_data.get('exercises', []))} exercises",
+            'date': workout_date
+        }
+
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
 
 workout_logger = WorkoutLogger(gemini_model, supabase)
 
