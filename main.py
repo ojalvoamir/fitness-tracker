@@ -142,6 +142,7 @@ def home():
 
 
 
+
 def log_workout():
     try:
         data = request.get_json()
@@ -193,34 +194,48 @@ def log_workout():
             }).execute()
             session_id = session_insert.data[0]['session_id']
 
-        # Insert each exercise into sets and metrics
+        # Group metrics by activity_name
+        grouped_exercises = {}
         for exercise in parsed_workout.get('exercises', []):
-            activity_name = exercise['activity_name']
-            metric_type = exercise['metric_type']
-            unit = exercise.get('unit')
+            key = exercise['activity_name']
+            if key not in grouped_exercises:
+                grouped_exercises[key] = {
+                    'raw_input': parsed_workout['raw_input'],
+                    'notes': parsed_workout.get('notes', ''),
+                    'metrics': []
+                }
+            grouped_exercises[key]['metrics'].append({
+                'metric_type': exercise['metric_type'],
+                'value': exercise['value'],
+                'unit': exercise.get('unit')
+            })
 
+        # Insert one set per activity_name and multiple metrics per set
+        for activity_name, details in grouped_exercises.items():
             set_entry = {
                 'session_id': session_id,
                 'activity_name': activity_name,
-                'raw_input': parsed_workout['raw_input'],
-                'notes': parsed_workout.get('notes', ''),
+                'raw_input': details['raw_input'],
+                'notes': details['notes'],
                 'created_at': datetime.utcnow().isoformat()
             }
             set_result = supabase.table('sets').insert(set_entry).execute()
             set_id = set_result.data[0]['set_id']
 
-            metric_entry = {
-                'set_id': set_id,
-                'metric_type': metric_type,
-                'value': exercise['value'],
-                'unit': unit
-            }
-            supabase.table('metrics').insert(metric_entry).execute()
+            for metric in details['metrics']:
+                metric_entry = {
+                    'set_id': set_id,
+                    'metric_type': metric['metric_type'],
+                    'value': metric['value'],
+                    'unit': metric['unit']
+                }
+                supabase.table('metrics').insert(metric_entry).execute()
 
         return jsonify({'success': True, 'parsed_workout': parsed_workout})
     except Exception as e:
         print(f"Error in log_workout: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 
