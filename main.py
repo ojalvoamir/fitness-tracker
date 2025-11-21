@@ -140,6 +140,7 @@ def home():
 @app.route('/log', methods=['POST'])
 
 
+
 def log_workout():
     try:
         data = request.get_json()
@@ -160,7 +161,6 @@ def log_workout():
 
         # Use default integer user_id = 1 and username = 'User'
         user_id = 1
-        username = 'User'
         workout_date = parsed_workout['date']
 
         # Check if session already exists for this user and date
@@ -183,10 +183,17 @@ def log_workout():
             # Ensure activity_name exists in activity_names table
             activity_check = supabase.table('activity_names').select('activity_name').eq('activity_name', activity_name).execute()
             if not activity_check.data:
-                supabase.table('activity_names').insert({
-                    'activity_name': activity_name,
-                    'activity_type': 'exercise'
-                }).execute()
+                try:
+                    supabase.table('activity_names').insert({
+                        'activity_name': activity_name,
+                        'activity_type': 'exercise'
+                    }).execute()
+                except Exception as e:
+                    print(f"Error inserting new activity_name '{activity_name}': {e}")
+                    return jsonify({
+                        'success': False,
+                        'error': f"Failed to insert new activity_name '{activity_name}': {str(e)}"
+                    }), 500
 
             # Insert into sets
             set_entry = {
@@ -211,8 +218,8 @@ def log_workout():
         return jsonify({'success': True, 'parsed_workout': parsed_workout})
     except Exception as e:
         print(f"Error in log_workout: {e}")
-
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 if __name__ == '__main__':
