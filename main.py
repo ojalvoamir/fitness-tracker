@@ -155,6 +155,26 @@ def log_workout():
                 'error': 'Validation failed',
                 'validation': validation
             }), 400
+        
+        # Insert each exercise into Supabase
+        for exercise in parsed_workout.get('exercises', []):
+            entry = {
+                'date': parsed_workout['date'],
+                'user_id': parsed_workout['user_id'],
+                'username': parsed_workout['username'],
+                'raw_input': parsed_workout['raw_input'],
+                'activity_name': exercise['activity_name'],
+                'set_number': exercise.get('set_number', 1),
+                'metric_type': exercise['metric_type'],
+                'value': exercise['value'],
+                'unit': exercise.get('unit'),
+                'created_at': datetime.utcnow().isoformat(),
+                'notes': parsed_workout.get('notes', ''),
+                'activity_type': 'exercise'
+            }
+            supabase.table('activity_logs').insert(entry).execute()
+            result = supabase.table('activity_logs').insert(entry).execute()
+            print("Insert result:", result)
 
         return jsonify({'success': True, 'parsed_workout': parsed_workout})
     except Exception as e:
