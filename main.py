@@ -138,6 +138,7 @@ def home():
     return render_template('index.html')
 
 @app.route('/log', methods=['POST'])
+
 def log_workout():
     try:
         data = request.get_json()
@@ -156,12 +157,9 @@ def log_workout():
                 'validation': validation
             }), 400
 
-        # Ensure user exists
-        user_id = parsed_workout['user_id']
-        username = parsed_workout['username']
-        user_check = supabase.table('users').select('user_id').eq('user_id', user_id).execute()
-        if not user_check.data:
-            supabase.table('users').insert({'user_id': user_id, 'username': username}).execute()
+        # Use default integer user_id = 1 and username = 'User'
+        user_id = 1
+        username = 'User'
 
         # Create session for the workout date
         workout_date = parsed_workout['date']
