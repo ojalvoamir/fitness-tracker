@@ -155,31 +155,50 @@ def log_workout():
                 'error': 'Validation failed',
                 'validation': validation
             }), 400
-        
-        # Insert each exercise into Supabase
+
+        # Ensure user exists
+        user_id = parsed_workout['user_id']
+        username = parsed_workout['username']
+        user_check = supabase.table('users').select('user_id').eq('user_id', user_id).execute()
+        if not user_check.data:
+            supabase.table('users').insert({'user_id': user_id, 'username': username}).execute()
+
+        # Create session for the workout date
+        workout_date = parsed_workout['date']
+        session_insert = supabase.table('sessions').insert({
+            'user_id': user_id,
+            'date': workout_date
+        }).execute()
+        session_id = session_insert.data[0]['session_id']
+
+        # Insert each exercise into sets and metrics
         for exercise in parsed_workout.get('exercises', []):
-            entry = {
-                'date': parsed_workout['date'],
-                'user_id': parsed_workout['user_id'],
-                'username': parsed_workout['username'],
-                'raw_input': parsed_workout['raw_input'],
+            set_entry = {
+                'session_id': session_id,
                 'activity_name': exercise['activity_name'],
                 'set_number': exercise.get('set_number', 1),
+                'raw_input': parsed_workout['raw_input'],
+                'notes': parsed_workout.get('notes', ''),
+                'created_at': datetime.utcnow().isoformat()
+            }
+            set_result = supabase.table('sets').insert(set_entry).execute()
+            set_id = set_result.data[0]['set_id']
+
+            metric_entry = {
+                'set_id': set_id,
                 'metric_type': exercise['metric_type'],
                 'value': exercise['value'],
-                'unit': exercise.get('unit'),
-                'created_at': datetime.utcnow().isoformat(),
-                'notes': parsed_workout.get('notes', ''),
-                'activity_type': 'exercise'
+                'unit': exercise.get('unit')
             }
-            supabase.table('activity_logs').insert(entry).execute()
-            result = supabase.table('activity_logs').insert(entry).execute()
-            print("Insert result:", result)
+            metric_result = supabase.table('metrics').insert(metric_entry).execute()
+            print("Inserted set:", set_result)
+            print("Inserted metric:", metric_result)
 
         return jsonify({'success': True, 'parsed_workout': parsed_workout})
     except Exception as e:
         print(f"Error in log_workout: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
