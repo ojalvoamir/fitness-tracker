@@ -132,6 +132,11 @@ Output format:
 
 workout_logger = WorkoutLogger(gemini_model, supabase)
 
+
+@app.route('/', methods=['GET'])
+def home():
+    return render_template('index.html')
+
 @app.route('/log', methods=['POST'])
 def log_workout():
     try:
