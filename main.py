@@ -174,7 +174,6 @@ def log_workout():
             set_entry = {
                 'session_id': session_id,
                 'activity_name': exercise['activity_name'],
-                'set_number': exercise.get('set_number', 1),
                 'raw_input': parsed_workout['raw_input'],
                 'notes': parsed_workout.get('notes', ''),
                 'created_at': datetime.utcnow().isoformat()
