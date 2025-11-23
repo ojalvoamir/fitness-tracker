@@ -80,24 +80,36 @@ class WorkoutLogger:
         return f"""
 Today's date is {current_date}.
 Convert the following workout description into structured JSON.
-Extract the date from the input if specified and include it in 'YYYY-MM-DD' format. If no date is specified, use today's date.
-Return ONLY the JSON and no additional text. Don't use markdown and any additional characters such as '.
-
+Rules:
+- If the workout is a composite (e.g., consists of multiple exercises like Cindy), include BOTH:
+    1. The composite workout as one entry (with rounds/time).
+    2. The individual exercises as separate entries, each referencing the composite workout in 'parent_activity'.
+- For each exercise, include: activity_name, set_number, metric_type, value, unit.
+- Use 'parent_activity' for exercises that belong to a composite workout.
+- Extract date from input if specified; otherwise use today's date.
+Return ONLY JSON, no extra text.
 Input: "{user_input}"
-
 Output format:
 {{
   "date": "YYYY-MM-DD",
-  "user_id": "default_user",
+  "user_id": 1,
   "username": "User",
   "raw_input": "{user_input}",
   "exercises": [
     {{
+      "activity_name": "Cindy",
+      "set_number": 1,
+      "metric_type": "rounds",
+      "value": 8,
+      "unit": "rounds"
+    }},
+    {{
       "activity_name": "pull-up",
       "set_number": 1,
       "metric_type": "reps",
-      "value": 5,
-      "unit": "reps"
+      "value": 40,
+      "unit": "reps",
+      "parent_activity": "Cindy"
     }}
   ]
 }}
@@ -139,40 +151,95 @@ def home():
 
 @app.route('/log', methods=['POST'])
 
-
-
-
-
 def log_workout():
     try:
         data = request.get_json()
         user_input = data.get('input', '').strip()
-
         if not user_input:
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
 
         parsed_workout = workout_logger.parse_input(user_input)
-
-        # Use default integer user_id = 1 and username = 'User'
-        user_id = 1
         workout_date = parsed_workout['date']
+        user_id = 1  # default user
+        raw_input = parsed_workout['raw_input']
 
-        # Ensure all activity names exist before validation
+        # Ensure all activity names exist in DB
         for exercise in parsed_workout.get('exercises', []):
             activity_name = exercise['activity_name']
             activity_check = supabase.table('activity_names').select('activity_name').eq('activity_name', activity_name).execute()
             if not activity_check.data:
-                try:
-                    supabase.table('activity_names').insert({
-                        'activity_name': activity_name,
-                        'activity_type': 'exercise'
-                    }).execute()
-                except Exception as e:
-                    print(f"Error inserting new activity_name '{activity_name}': {e}")
-                    return jsonify({
-                        'success': False,
-                        'error': f"Failed to insert new activity_name '{activity_name}': {str(e)}"
-                    }), 500
+                supabase.table('activity_names').insert({
+                    'activity_name': activity_name,
+                    'activity_type': 'exercise'
+                }).execute()
+
+        # Validate exercises and units
+        validation = validate_exercises_and_units(parsed_workout, supabase)
+        if validation.get('suggestions'):
+            return jsonify({
+                'success': False,
+                'error': 'Validation failed',
+                'validation': validation
+            }), 400
+
+        # Check if session exists for this user/date
+        existing_session = supabase.table('sessions').select('session_id').eq('user_id', user_id).eq('date', workout_date).execute()
+        if existing_session.data:
+            session_id = existing_session.data[0]['session_id']
+        else:
+            session_insert = supabase.table('sessions').insert({
+                'user_id': user_id,
+                'date': workout_date,
+                'created_at': datetime.utcnow().isoformat()
+            }).execute()
+            session_id = session_insert.data[0]['session_id']
+
+        # Group exercises by activity_name
+        grouped_exercises = {}
+        for exercise in parsed_workout.get('exercises', []):
+            key = exercise['activity_name']
+            if key not in grouped_exercises:
+                grouped_exercises[key] = {
+                    'raw_input': raw_input,
+                    'notes': parsed_workout.get('notes', ''),
+                    'metrics': [],
+                    'parent_activity': exercise.get('parent_activity')  # NEW FIELD
+                }
+            grouped_exercises[key]['metrics'].append({
+                'metric_type': exercise['metric_type'],
+                'value': exercise['value'],
+                'unit': exercise.get('unit')
+            })
+
+        # Insert sets and metrics
+        for activity_name, details in grouped_exercises.items():
+            set_entry = {
+                'session_id': session_id,
+                'activity_name': activity_name,
+                'raw_input': details['raw_input'],
+                'notes': details['notes'],
+                'created_at': datetime.utcnow().isoformat(),
+                'parent_activity': details['parent_activity']  # NEW FIELD
+            }
+            set_result = supabase.table('sets').insert(set_entry).execute()
+            set_id = set_result.data[0]['set_id']
+
+            for metric in details['metrics']:
+                metric_entry = {
+                    'set_id': set_id,
+                    'metric_type': metric['metric_type'],
+                    'value': metric['value'],
+                    'unit': metric['unit'],
+                    'created_at': datetime.utcnow().isoformat()
+                }
+                supabase.table('metrics').insert(metric_entry).execute()
+
+        return jsonify({'success': True, 'parsed_workout': parsed_workout})
+
+    except Exception as e:
+        print(f"Error in log_workout: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
         # Now validate exercises and units
         validation = validate_exercises_and_units(parsed_workout, supabase)
