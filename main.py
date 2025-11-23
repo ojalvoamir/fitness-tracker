@@ -117,7 +117,11 @@ Output format:
 """
 
 # Safe parsing layer
-def parse_input(user_input: str) -> dict:
+
+def parse_input(user_input: str, current_date: str = None) -> dict:
+    if current_date is None:
+        current_date = datetime.now().strftime('%Y-%m-%d')
+
     try:
         prompt = generate_gemini_prompt(user_input)
         response = gemini_model.generate_content(prompt)
