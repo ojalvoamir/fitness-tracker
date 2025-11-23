@@ -87,8 +87,11 @@ Rules:
 - For each exercise, include: activity_name, set_number, metric_type, value, unit.
 - Use 'parent_activity' for exercises that belong to a composite workout.
 - Extract date from input if specified; otherwise use today's date.
-Return ONLY JSON, no extra text.
+
+If the input contains multiple exercises, output them as separate entries in the "exercises" array.
 If an exercise has multiple metrics (e.g., weight and reps), output them as separate entries in the "metrics" array, not as a combined object.
+Return ONLY valid JSON. Do not include any text, comments, markdown, or explanations.
+
 Input: "{user_input}"
 Output format:
 {{
