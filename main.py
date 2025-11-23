@@ -41,19 +41,20 @@ def validate_exercises_and_units(parsed_workout, supabase_client):
         unknown_exercises = []
         unknown_units = []
         suggestions = []
-        for exercise in parsed_workout.get('exercises', []):
-            name = exercise.get('activity_name')
-            unit = exercise.get('unit')
-            if name and name not in existing_activities:
-                unknown_exercises.append(name)
-                match = get_close_matches(name, existing_activities, n=1)
-                if match:
-                    suggestions.append({'type': 'exercise_name', 'input': name, 'suggested': match[0]})
-            if unit and unit not in existing_units:
-                unknown_units.append(unit)
-                match = get_close_matches(unit, existing_units, n=1)
-                if match:
-                    suggestions.append({'type': 'unit', 'input': unit, 'suggested': match[0]})
+        for session in parsed_workout.get('sessions', []):
+            for exercise in session.get('exercises', []):
+                name = exercise.get('activity_name')
+                unit = exercise.get('unit')
+                if name and name not in existing_activities:
+                    unknown_exercises.append(name)
+                    match = get_close_matches(name, existing_activities, n=1)
+                    if match:
+                        suggestions.append({'type': 'exercise_name', 'input': name, 'suggested': match[0]})
+                if unit and unit not in existing_units:
+                    unknown_units.append(unit)
+                    match = get_close_matches(unit, existing_units, n=1)
+                    if match:
+                        suggestions.append({'type': 'unit', 'input': unit, 'suggested': match[0]})
         return {
             'unknown_exercises': unknown_exercises,
             'unknown_units': unknown_units,
@@ -63,73 +64,81 @@ def validate_exercises_and_units(parsed_workout, supabase_client):
         print(f"Error during validation: {e}")
         return {}
 
-# Gemini prompt generator
-def generate_gemini_prompt(user_input: str, current_date: str) -> str:
+# Gemini prompt generator for multi-day input
+def generate_gemini_prompt(user_input: str) -> str:
     return f"""
-Today's date is {current_date}.
 Convert the following workout description into structured JSON.
 Rules:
-- If the workout is a composite (e.g., consists of multiple exercises like Cindy), include BOTH:
-    1. The composite workout as one entry (with rounds/time).
-    2. The individual exercises as separate entries, each referencing the composite workout in 'parent_activity'.
+- If the input contains multiple dates, output an array of sessions.
+- Each session should include its date and exercises.
 - For each exercise, include: activity_name, set_number, metric_type, value, unit.
 - If an exercise has multiple metrics (e.g., weight and reps), output them as separate objects in the "metrics" array, not combined.
-- Extract date from input if specified; otherwise use today's date.
+- For composite workouts (e.g., Cindy), include BOTH:
+    1. The composite workout as one entry.
+    2. The individual exercises as separate entries with 'parent_activity'.
 Return ONLY valid JSON. Do not include any text, comments, markdown, or explanations.
 Input: "{user_input}"
 Output format:
 {{
-  "date": "YYYY-MM-DD",
-  "user_id": 1,
-  "username": "User",
-  "raw_input": "{user_input}",
-  "exercises": [
+  "sessions": [
     {{
-      "activity_name": "Cindy",
-      "set_number": 1,
-      "metric_type": "rounds",
-      "value": 8,
-      "unit": "rounds"
+      "date": "YYYY-MM-DD",
+      "exercises": [
+        {{
+          "activity_name": "pull-up",
+          "set_number": 1,
+          "metric_type": "reps",
+          "value": 10,
+          "unit": "reps"
+        }}
+      ]
     }},
     {{
-      "activity_name": "pull-up",
-      "set_number": 1,
-      "metric_type": "reps",
-      "value": 40,
-      "unit": "reps",
-      "parent_activity": "Cindy"
+      "date": "YYYY-MM-DD",
+      "exercises": [
+        {{
+          "activity_name": "lateral raise",
+          "set_number": 1,
+          "metric_type": "weight",
+          "value": 15,
+          "unit": "kg"
+        }},
+        {{
+          "activity_name": "lateral raise",
+          "set_number": 1,
+          "metric_type": "reps",
+          "value": 17,
+          "unit": "reps"
+        }}
+      ]
     }}
   ]
 }}
 """
 
 # Safe parsing layer
-def parse_input(user_input: str, current_date: str = None) -> dict:
-    if current_date is None:
-        current_date = datetime.now().strftime('%Y-%m-%d')
+def parse_input(user_input: str) -> dict:
     try:
-        prompt = generate_gemini_prompt(user_input, current_date)
+        prompt = generate_gemini_prompt(user_input)
         response = gemini_model.generate_content(prompt)
         response_text = response.text.strip()
 
-        # Try direct JSON parse
         try:
             parsed_json = json.loads(response_text)
         except json.JSONDecodeError:
-            # Attempt to extract JSON block
             match = re.search(r'\{.*\}', response_text, re.DOTALL)
             if match:
                 try:
                     parsed_json = json.loads(match.group(0).strip())
                 except json.JSONDecodeError:
-                    raise ValueError("Could not parse JSON from Gemini response")
+                    return {'success': False, 'error': 'Could not parse JSON from Gemini response'}
             else:
-                raise ValueError("Gemini response did not contain JSON")
+                return {'success': False, 'error': 'Gemini response did not contain JSON'}
 
         return parsed_json
     except Exception as e:
         print(f"Error parsing input: {e}")
-        raise
+        return {'success': False, 'error': str(e)}
 
 workout_logger = type('WorkoutLogger', (), {'parse_input': parse_input})()
 
@@ -146,80 +155,62 @@ def log_workout():
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
 
         parsed_workout = workout_logger.parse_input(user_input)
-        workout_date = parsed_workout['date']
-        user_id = 1
-        raw_input = parsed_workout['raw_input']
-
-        # Ensure all activity names exist
-        for exercise in parsed_workout.get('exercises', []):
-            activity_name = exercise['activity_name']
-            activity_check = supabase.table('activity_names').select('activity_name').eq('activity_name', activity_name).execute()
-            if not activity_check.data:
-                supabase.table('activity_names').insert({
-                    'activity_name': activity_name,
-                    'activity_type': 'exercise'
-                }).execute()
+        if parsed_workout.get('success') is False:
+            return jsonify(parsed_workout), 400
 
         # Validate exercises and units
         validation = validate_exercises_and_units(parsed_workout, supabase)
         if validation.get('suggestions'):
             return jsonify({'success': False, 'error': 'Validation failed', 'validation': validation}), 400
 
-        # Check session
-        existing_session = supabase.table('sessions').select('session_id').eq('user_id', user_id).eq('date', workout_date).execute()
-        if existing_session.data:
-            session_id = existing_session.data[0]['session_id']
-        else:
-            session_insert = supabase.table('sessions').insert({
-                'user_id': user_id,
-                'date': workout_date,
-                'created_at': datetime.utcnow().isoformat()
-            }).execute()
-            session_id = session_insert.data[0]['session_id']
+        for session in parsed_workout.get('sessions', []):
+            workout_date = session['date']
+            user_id = 1
+            raw_input = user_input
 
-        # Group exercises
-        grouped_exercises = {}
-        for exercise in parsed_workout.get('exercises', []):
-            key = exercise['activity_name']
-            if key not in grouped_exercises:
-                grouped_exercises[key] = {
-                    'raw_input': raw_input,
-                    'notes': parsed_workout.get('notes', ''),
-                    'metrics': [],
-                    'parent_activity': exercise.get('parent_activity')
+            # Check session
+            existing_session = supabase.table('sessions').select('session_id').eq('user_id', user_id).eq('date', workout_date).execute()
+            if existing_session.data:
+                session_id = existing_session.data[0]['session_id']
+            else:
+                session_insert = supabase.table('sessions').insert({
+                    'user_id': user_id,
+                    'date': workout_date,
+                    'created_at': datetime.utcnow().isoformat()
+                }).execute()
+                session_id = session_insert.data[0]['session_id']
+
+            # Group exercises
+            grouped_exercises = {}
+            for exercise in session.get('exercises', []):
+                key = exercise['activity_name']
+                if key not in grouped_exercises:
+                    grouped_exercises[key] = {
+                        'raw_input': raw_input,
+                        'notes': '',
+                        'metrics': [],
+                        'parent_activity': exercise.get('parent_activity')
+                    }
+                grouped_exercises[key]['metrics'].append({
+                    'metric_type': exercise['metric_type'],
+                    'value': exercise['value'],
+                    'unit': exercise.get('unit')
+                })
+
+            # Insert sets and metrics
+            for activity_name, details in grouped_exercises.items():
+                set_entry = {
+                    'session_id': session_id,
+                    'activity_name': activity_name,
+                    'raw_input': details['raw_input'],
+                    'notes': details['notes'],
+                    'created_at': datetime.utcnow().isoformat(),
+                    'parent_activity': details['parent_activity']
                 }
-            grouped_exercises[key]['metrics'].append({
-                'metric_type': exercise['metric_type'],
-                'value': exercise['value'],
-                'unit': exercise.get('unit')
-            })
+                set_result = supabase.table('sets').insert(set_entry).execute()
+                set_id = set_result.data[0]['set_id']
 
-        # Insert sets and metrics
-        for activity_name, details in grouped_exercises.items():
-            set_entry = {
-                'session_id': session_id,
-                'activity_name': activity_name,
-                'raw_input': details['raw_input'],
-                'notes': details['notes'],
-                'created_at': datetime.utcnow().isoformat(),
-                'parent_activity': details['parent_activity']
-            }
-            set_result = supabase.table('sets').insert(set_entry).execute()
-            set_id = set_result.data[0]['set_id']
-
-            for metric in details['metrics']:
-                # Handle combined metrics if any
-                if isinstance(metric['value'], dict):
-                    for key, val in metric['value'].items():
-                        metric_entry = {
-                            'set_id': set_id,
-                            'metric_type': key,
-                            'value': val,
-                            'unit': 'kg' if key == 'weight' else 'reps',
-                            'created_at': datetime.utcnow().isoformat()
-                        }
-                        supabase.table('metrics').insert(metric_entry).execute()
-                else:
+                for metric in details['metrics']:
                     metric_entry = {
                         'set_id': set_id,
                         'metric_type': metric['metric_type'],
