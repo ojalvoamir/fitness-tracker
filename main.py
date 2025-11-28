@@ -49,6 +49,7 @@ Rules:
 - If input contains multiple dates, output an array of sessions.
 - Each session should include its date and exercises.
 - For each exercise, include: activity_name, set_number, metric_type, value, unit.
+- Use the date format YYYY-MM-DD, where Y is year, M is month, and D is day.
 Return ONLY valid JSON. No extra text.
 Input: "{user_input}"
 Output format:
