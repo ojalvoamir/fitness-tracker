@@ -152,6 +152,7 @@ def home():
 
 
 
+
 @app.route('/log', methods=['POST'])
 def log_workout():
     try:
@@ -171,16 +172,16 @@ def log_workout():
         for session in parsed_workout.get('sessions', []):
             workout_date = session['date']
 
-            # Insert or get session
+            # Insert session
             session_insert = supabase.table('sessions').insert({
                 'user_id': user_id,
                 'date': workout_date,
                 'created_at': datetime.utcnow().isoformat()
             }).execute()
 
-            if session_insert.error:
-                print("Session insert error:", session_insert.error)
-                return jsonify({'success': False, 'error': session_insert.error}), 500
+            if not session_insert.data:
+                print("Session insert failed:", session_insert)
+                return jsonify({'success': False, 'error': 'Session insert failed'}), 500
 
             session_id = session_insert.data[0]['session_id']
 
@@ -212,9 +213,9 @@ def log_workout():
                     'parent_activity': details['parent_activity']
                 }
                 set_result = supabase.table('sets').insert(set_entry).execute()
-                if set_result.error:
-                    print("Set insert error:", set_result.error)
-                    return jsonify({'success': False, 'error': set_result.error}), 500
+                if not set_result.data:
+                    print("Set insert failed:", set_result)
+                    return jsonify({'success': False, 'error': 'Set insert failed'}), 500
 
                 set_id = set_result.data[0]['set_id']
 
@@ -227,15 +228,16 @@ def log_workout():
                         'created_at': datetime.utcnow().isoformat()
                     }
                     metric_result = supabase.table('metrics').insert(metric_entry).execute()
-                    if metric_result.error:
-                        print("Metric insert error:", metric_result.error)
-                        return jsonify({'success': False, 'error': metric_result.error}), 500
+                    if not metric_result.data:
+                        print("Metric insert failed:", metric_result)
+                        return jsonify({'success': False, 'error': 'Metric insert failed'}), 500
 
         return jsonify({'success': True, 'parsed_workout': parsed_workout})
 
     except Exception as e:
         print(f"Error in log_workout: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 
