@@ -150,6 +150,7 @@ workout_logger = type('WorkoutLogger', (), {'parse_input': parse_input})()
 def home():
     return render_template('index.html')
 
+
 @app.route('/log', methods=['POST'])
 def log_workout():
     try:
@@ -158,22 +159,25 @@ def log_workout():
         if not user_input:
             return jsonify({'success': False, 'error': 'No workout input provided'}), 400
 
+        # Parse input using Gemini
         parsed_workout = workout_logger.parse_input(user_input)
         if parsed_workout.get('success') is False:
             return jsonify(parsed_workout), 400
 
-        # Validate exercises and units
-        validation = validate_exercises_and_units(parsed_workout, supabase)
-        if validation.get('suggestions'):
-            return jsonify({'success': False, 'error': 'Validation failed', 'validation': validation}), 400
+        user_id = 1  # Default user for now
+        raw_input = user_input
 
+        # Loop through sessions
         for session in parsed_workout.get('sessions', []):
             workout_date = session['date']
-            user_id = 1
-            raw_input = user_input
 
-            # Check session
-            existing_session = supabase.table('sessions').select('session_id').eq('user_id', user_id).eq('date', workout_date).execute()
+            # Check if session exists
+            existing_session = supabase.table('sessions') \
+                .select('session_id') \
+                .eq('user_id', user_id) \
+                .eq('date', workout_date) \
+                .execute()
+
             if existing_session.data:
                 session_id = existing_session.data[0]['session_id']
             else:
@@ -184,7 +188,7 @@ def log_workout():
                 }).execute()
                 session_id = session_insert.data[0]['session_id']
 
-            # Group exercises
+            # Group exercises by activity_name
             grouped_exercises = {}
             for exercise in session.get('exercises', []):
                 key = exercise['activity_name']
@@ -229,6 +233,7 @@ def log_workout():
     except Exception as e:
         print(f"Error in log_workout: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
