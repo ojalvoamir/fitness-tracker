@@ -151,6 +151,7 @@ def home():
     return render_template('index.html')
 
 
+
 @app.route('/log', methods=['POST'])
 def log_workout():
     try:
@@ -167,28 +168,23 @@ def log_workout():
         user_id = 1  # Default user for now
         raw_input = user_input
 
-        # Loop through sessions
         for session in parsed_workout.get('sessions', []):
             workout_date = session['date']
 
-            # Check if session exists
-            existing_session = supabase.table('sessions') \
-                .select('session_id') \
-                .eq('user_id', user_id) \
-                .eq('date', workout_date) \
-                .execute()
+            # Insert or get session
+            session_insert = supabase.table('sessions').insert({
+                'user_id': user_id,
+                'date': workout_date,
+                'created_at': datetime.utcnow().isoformat()
+            }).execute()
 
-            if existing_session.data:
-                session_id = existing_session.data[0]['session_id']
-            else:
-                session_insert = supabase.table('sessions').insert({
-                    'user_id': user_id,
-                    'date': workout_date,
-                    'created_at': datetime.utcnow().isoformat()
-                }).execute()
-                session_id = session_insert.data[0]['session_id']
+            if session_insert.error:
+                print("Session insert error:", session_insert.error)
+                return jsonify({'success': False, 'error': session_insert.error}), 500
 
-            # Group exercises by activity_name
+            session_id = session_insert.data[0]['session_id']
+
+            # Group exercises
             grouped_exercises = {}
             for exercise in session.get('exercises', []):
                 key = exercise['activity_name']
@@ -216,6 +212,10 @@ def log_workout():
                     'parent_activity': details['parent_activity']
                 }
                 set_result = supabase.table('sets').insert(set_entry).execute()
+                if set_result.error:
+                    print("Set insert error:", set_result.error)
+                    return jsonify({'success': False, 'error': set_result.error}), 500
+
                 set_id = set_result.data[0]['set_id']
 
                 for metric in details['metrics']:
@@ -226,13 +226,17 @@ def log_workout():
                         'unit': metric['unit'],
                         'created_at': datetime.utcnow().isoformat()
                     }
-                    supabase.table('metrics').insert(metric_entry).execute()
+                    metric_result = supabase.table('metrics').insert(metric_entry).execute()
+                    if metric_result.error:
+                        print("Metric insert error:", metric_result.error)
+                        return jsonify({'success': False, 'error': metric_result.error}), 500
 
         return jsonify({'success': True, 'parsed_workout': parsed_workout})
 
     except Exception as e:
         print(f"Error in log_workout: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 if __name__ == '__main__':
